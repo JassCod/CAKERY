@@ -437,15 +437,18 @@ end $$;
 -- Auth & account
 -- ---------------------------------------------------------------------
 create or replace function public.staff_email(p_username text) returns text
-language sql immutable as $$ select lower(p_username) || '@cakery.local' $$;
+language sql immutable as $$
+  select case when position('@' in p_username) > 0 then lower(btrim(p_username)) else lower(btrim(p_username)) || '@cakery.local' end
+$$;
 
 -- Creates a Supabase Auth login + profile. Used by setup_owner and user_create.
 create or replace function public.create_login(p_username text, p_password text, p_name text, p_role text, p_phone text, p_must_change boolean) returns uuid
 language plpgsql security definer set search_path = public, extensions as $$
 declare uid uuid := gen_random_uuid(); em text;
 begin
-  if p_username is null or p_username !~ '^[a-zA-Z0-9._-]{3,40}$' then
-    raise exception 'Username: 3-40 letters, numbers, dot, dash or underscore';
+  p_username := btrim(coalesce(p_username, ''));
+  if p_username !~ '^[a-zA-Z0-9._-]{3,40}$' and p_username !~ '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$' then
+    raise exception 'Username: 3-40 letters, numbers, dot, dash or underscore — or an email address';
   end if;
   if p_password is null or length(p_password) < 6 then raise exception 'Password must be at least 6 characters'; end if;
   em := public.staff_email(p_username);
@@ -588,7 +591,7 @@ declare uid uuid; r text := p ->> 'role';
 begin
   perform public.require_perm('users.manage');
   perform public.assert_can_manage(r);
-  uid := public.create_login(public.v_str(p, 'username', true, 40, 'Username'), public.v_str(p, 'password', true, 200, 'Password'),
+  uid := public.create_login(public.v_str(p, 'username', true, 120, 'Username'), public.v_str(p, 'password', true, 200, 'Password'),
     public.v_str(p, 'name', true, 80, 'Name'), r, public.v_str(p, 'phone', false, 30), true);
   perform public.audit('user_created', 'user', uid::text, jsonb_build_object('username', p ->> 'username', 'role', r));
   return jsonb_build_object('id', uid);

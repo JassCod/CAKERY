@@ -57,9 +57,13 @@ async function showLogin() {
   destroyCharts();
   window.removeEventListener('hashchange', route);
   let info = {};
-  try { info = await api('/auth/public-info'); } catch { /* offline */ }
+  let connectError = '';
+  if (configured) {
+    try { info = await api('/auth/public-info'); }
+    catch (e) { connectError = e.message || 'Cannot reach the database.'; }
+  }
   renderLogin($('#app'), {
-    shopName: info.shop_name, tagline: info.tagline, needsSetup: !!info.needs_setup, notConfigured: !configured,
+    shopName: info.shop_name, tagline: info.tagline, needsSetup: !!info.needs_setup, notConfigured: !configured, connectError,
     onSuccess: async () => { await loadMe(); startApp(); },
   });
 }

@@ -121,6 +121,16 @@ test('owner can change role permissions; manager cannot', async () => {
   await as(ids.manager); await fails('role_update', { p_role: 'cook', p_permissions: [] }, /do not have access/);
 });
 
+test('staff can use an email address as their login', async () => {
+  await as(ids.owner);
+  await rpc('user_create', { p: { name: 'Priya', username: 'Priya.Manager@Gmail.com', password: 'secret1', role: 'manager' } });
+  const uid = await login('priya.manager@gmail.com', 'secret1');
+  assert.equal((await rpc('me')).user.username, 'priya.manager@gmail.com');
+  assert.ok(uid);
+  await as(ids.owner);
+  await fails('user_create', { p: { name: 'Bad', username: 'not an email@', password: 'secret1', role: 'cook' } }, /Username/);
+});
+
 test('disabled staff cannot sign in or act', async () => {
   await as(ids.owner);
   const u = await rpc('user_create', { p: { name: 'Temp', username: 'temp1', password: 'secret1', role: 'cashier' } });

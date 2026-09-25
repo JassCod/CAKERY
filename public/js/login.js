@@ -44,7 +44,7 @@ const CAKE_SVG = `
 
 const SPRINKLE_COLORS = ['#ffd166', '#f58fb0', '#7ad3c0', '#ffffff', '#c7a4ff'];
 
-export function renderLogin(root, { shopName = 'Cakery', tagline = '', onSuccess, needsSetup = false, notConfigured = false }) {
+export function renderLogin(root, { shopName = 'Cakery', tagline = '', onSuccess, needsSetup = false, notConfigured = false, connectError = '' }) {
   const sprinkles = Array.from({ length: 22 }, (_, i) => {
     const left = (i * 37) % 100;
     const dur = 9 + (i * 7) % 11;
@@ -80,13 +80,13 @@ export function renderLogin(root, { shopName = 'Cakery', tagline = '', onSuccess
       </div>` : `<form class="login-card" novalidate autocomplete="on">
         <div class="hello">${needsSetup ? 'Set up your <em>shop</em>' : 'Welcome <em>back</em>'}</div>
         <div class="sub">${needsSetup ? 'First time here — create the owner account. You can add staff after signing in.' : 'Sign in with the account your shop owner gave you.'}</div>
-        <div class="login-error hidden" role="alert"></div>
+        <div class="login-error ${connectError ? '' : 'hidden'}" role="alert">${esc(connectError)}</div>
         ${needsSetup ? `<div class="field">
           <label for="lg-name">Your name</label>
           <div class="input-icon">${icon('user')}<input id="lg-name" class="input" name="name" autocomplete="name" required></div>
         </div>` : ''}
         <div class="field">
-          <label for="lg-user">Username</label>
+          <label for="lg-user">Username or email</label>
           <div class="input-icon">${icon('user')}<input id="lg-user" class="input" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required ${needsSetup ? 'value="owner"' : ''}></div>
         </div>
         <div class="field">

@@ -16,13 +16,22 @@ export class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
 
-const staffEmail = u => String(u).trim().toLowerCase() + '@cakery.local';
+// Staff sign in with a username (stored as username@cakery.local) or with a real email address.
+const staffEmail = u => { const v = String(u).trim().toLowerCase(); return v.includes('@') ? v : v + '@cakery.local'; };
 const slug = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50) || 'vendor';
 const nullIfEmpty = v => (v === '' || v === undefined ? null : v);
 
 async function rpc(fn, args = {}) {
-  const { data, error } = await sb.rpc(fn, args);
+  let data, error;
+  try { ({ data, error } = await sb.rpc(fn, args)); }
+  catch { throw new HttpError(0, 'Cannot reach Supabase. Check SUPABASE_URL in GitHub → Settings → Variables, and that the Supabase project is not paused.'); }
   if (error) {
+    if (/api key|apikey|No API key/i.test(error.message || '') || error.code === '401') {
+      throw new HttpError(503, 'The Supabase key in the website settings is wrong. Check SUPABASE_ANON_KEY in GitHub → Settings → Variables.');
+    }
+    if (/fetch|network/i.test(error.message || '') && !error.code) {
+      throw new HttpError(0, 'Cannot reach Supabase. Check SUPABASE_URL in GitHub → Settings → Variables, and that the Supabase project is not paused.');
+    }
     const status = error.code === '28000' ? 401 : error.code === '42501' ? 403 : error.code === 'PGRST202' ? 500 : 400;
     const msg = error.code === 'PGRST202'
       ? 'The database is not set up yet (run supabase/setup.sql in Supabase).'
@@ -76,7 +85,13 @@ async function uploadDocuments(vendorId, form) {
 
 async function signIn(username, password) {
   const { error } = await sb.auth.signInWithPassword({ email: staffEmail(username), password });
-  if (error) throw new HttpError(401, /invalid login|invalid credentials/i.test(error.message) ? 'Incorrect username or password.' : error.message);
+  if (error) {
+    const m = error.message || '';
+    if (/invalid login|invalid credentials/i.test(m)) throw new HttpError(401, 'Incorrect username/email or password.');
+    if (/api key|apikey|jwt/i.test(m)) throw new HttpError(401, 'The Supabase key in the website settings is wrong. Check SUPABASE_ANON_KEY in GitHub → Settings → Variables.');
+    if (/fetch|network/i.test(m)) throw new HttpError(0, 'Cannot reach Supabase. Check SUPABASE_URL in GitHub → Settings → Variables, and that the Supabase project is not paused.');
+    throw new HttpError(401, m);
+  }
   try { await rpc('after_login'); }
   catch (e) { await sb.auth.signOut(); throw e; }
 }
