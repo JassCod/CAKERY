@@ -2,10 +2,20 @@
 // database functions (supabase/setup.sql) for data, Supabase Auth for logins,
 // and Supabase Storage for vendor invoices.
 const cfg = window.CAKERY_CONFIG || {};
-export const configured = !!(cfg.supabaseUrl && cfg.supabaseAnonKey && window.supabase);
+// Accept any form of the project address people may paste (…supabase.co, …/rest/v1/, trailing slash, no https).
+function projectUrl(raw) {
+  let v = String(raw || '').trim().replace(/^["']|["']$/g, '');
+  if (!v) return '';
+  if (/^[a-z0-9]{15,30}$/i.test(v)) v += '.supabase.co'; // just the project ID
+  if (!/^https?:\/\//i.test(v)) v = 'https://' + v;
+  try { return new URL(v).origin; } catch { return ''; }
+}
+const SUPABASE_URL = projectUrl(cfg.supabaseUrl);
+const SUPABASE_KEY = String(cfg.supabaseAnonKey || '').trim().replace(/^["']|["']$/g, '');
+export const configured = !!(SUPABASE_URL && SUPABASE_KEY && window.supabase);
 
 export const sb = configured
-  ? window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth: { persistSession: true, autoRefreshToken: true, storageKey: 'cakery-auth' } })
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, storageKey: 'cakery-auth' } })
   : null;
 
 const BUCKET = 'documents';

@@ -137,5 +137,5 @@ export function renderLogin(root, { shopName = 'Cakery', tagline = '', onSuccess
     }
   });
   function showErr(m) { err.textContent = m; err.classList.remove('hidden'); err.style.animation = 'none'; void err.offsetWidth; err.style.animation = ''; }
-  setTimeout(() => $(needsSetup ? '#lg-name' : '#lg-user', root).focus(), 400);
+  setTimeout(() => $(needsSetup ? '#lg-name' : '#lg-user', root).focus({ preventScroll: true }), 400);
 }
