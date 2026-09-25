@@ -39,7 +39,19 @@ jobs:
           SUPABASE_URL: ${{ vars.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
         run: |
-          node -e "require('fs').writeFileSync('public/config.js', 'window.CAKERY_CONFIG = ' + JSON.stringify({ supabaseUrl: process.env.SUPABASE_URL.trim(), supabaseAnonKey: process.env.SUPABASE_ANON_KEY.trim() }) + ';\n')"
+          node -e "
+            let u = process.env.SUPABASE_URL.trim().replace(/^[\"']|[\"']$/g, '');
+            if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+            u = new URL(u).origin;
+            const k = process.env.SUPABASE_ANON_KEY.trim().replace(/^[\"']|[\"']$/g, '');
+            require('fs').writeFileSync('public/config.js', 'window.CAKERY_CONFIG = ' + JSON.stringify({ supabaseUrl: u, supabaseAnonKey: k }) + ';\n');
+            console.log('Supabase project:', u);"
+      - name: Make browsers load the new version (cache busting)
+        run: |
+          V="${GITHUB_SHA::8}"
+          find public/js -name '*.js' -exec sed -i -E "s#(['\"])(\.{1,2}/[^'\"?]+\.js)\1#\1\2?v=$V\1#g" {} +
+          sed -i -E "s#(src|href)=\"(config\.js|vendor/[^\"?]+|js/app\.js|css/app\.css)\"#\1=\"\2?v=$V\"#g" public/index.html
+          grep -n '?v=' public/index.html
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
