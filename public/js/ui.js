@@ -39,7 +39,7 @@ export const fmtDay = d => fmtDate(d, { weekday: 'short', day: 'numeric', month:
 export const fmtMonth = m => fmtDate(m + '-01', { month: 'long', year: 'numeric' });
 export const fmtDateTime = d => {
   if (!d) return '—';
-  const x = new Date(d.replace(' ', 'T') + 'Z');
+  const x = new Date(/[zZ]$|[+-]\d\d:?\d\d$/.test(d) ? d : d.replace(' ', 'T') + 'Z');
   return isNaN(x) ? d : x.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 };
 export function relDay(d) {

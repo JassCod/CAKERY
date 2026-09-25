@@ -1,23 +1,23 @@
 # 🎂 Cakery — Bakery Management System
 
-A complete back-office app for a cake shop / bakery. It runs on one small server with a built-in SQLite database. Each staff member signs in with their own account, and each role sees only what it is allowed to.
+A complete back-office app for a cake shop / bakery. It is **free to run**: the website is published by **GitHub Pages** and the data lives in a free **Supabase** project (database, logins and invoice storage). Each staff member signs in with their own account, and each role sees only what it is allowed to.
 
 ## Features
 
 | Module | What it does |
 |---|---|
-| **Login** | Animated login screen. Sessions use secure cookies. Accounts lock for a while after too many wrong passwords. Staff must change a temporary password on first login. |
+| **Login** | Animated login screen. The very first visit creates the owner account. Staff must change their temporary password on first login. |
 | **Dashboard** | Different for each role. Money figures (month sales vs. last month, expenses, net, vendor pending, overdue bills, 30-day chart, expense breakdown) appear only for roles allowed to see them. Also shows today's production, upcoming cake orders and low stock. |
 | **Production** | Kitchen staff log what they made today (e.g. *40 × Choco Pastry*). At the end of the day they enter how many sold and how many were wasted; leftovers are calculated automatically. Has a bulk "End-of-day counts" screen. |
 | **Daily Closing** | End-of-day record of **Cash** and **Online** sales, opening cash, counted cash and cash handed over. The day's expenses are pulled in automatically, and it works out expected cash and any shortage or extra. Includes a calendar that shows closed and not-closed days. |
 | **Expenses** | Every expense transaction with category, payment mode, vendor, reference and who recorded it. Filters, a per-category breakdown and CSV export. |
 | **Items & Stock** | Every item in the shop is on record: products, ingredients and packaging. Stores cost and selling price, stock levels, reorder alerts, stock in/out/wastage and full movement history. |
 | **Vendors** | Supplier list with **pending amount**, bills (credit purchases) with due dates and overdue flags, and payments. There is a running ledger. Every payment is also recorded as an expense automatically. |
-| **Invoices & Docs** | Upload invoices, receipts and quotations (PDF, images, Word, Excel). Files are stored **in a folder per vendor** (`data/uploads/vendors/<id>-<vendor-name>/`) and can be viewed or downloaded. |
+| **Invoices & Docs** | Upload invoices, receipts and quotations (PDF, images, Word, Excel). Files are stored **in a folder per vendor** (`vendors/<id>-<vendor-name>/` in the Supabase Storage bucket `documents`) and can be viewed or downloaded. |
 | **Cake Orders** | Custom cake bookings with delivery date and time, message on the cake, advance paid and balance. A kanban board tracks each order: Pending → In kitchen → Ready → Delivered. |
 | **Monthly History** | Month-by-month history (6 to 36 months) and a full report for any month: cash vs. online, expenses by category, vendor billed/paid/pending, production sell-through, a day-by-day table, and CSV export and print. |
 | **Staff & Access** | Add, edit and disable staff accounts. A **permission matrix** lets the owner switch any permission on or off for each role. |
-| **Settings** | Shop name, currency, time zone, expense and item categories, **activity log** (every action is recorded), and a one-click **database backup**. |
+| **Settings** | Shop name, currency, time zone, expense and item categories, **activity log** (every action is recorded), and a one-click **backup** of all records. |
 
 Sales transactions are **not** stored one by one. Sales are recorded only as daily Cash and Online totals in the closing.
 
@@ -35,69 +35,62 @@ Sales transactions are **not** stored one by one. Sales are recorded only as dai
 | Staff accounts | ✅ | lower roles only | – | – | – | – |
 | Roles, settings, activity log, backup | ✅ | – | – | – | – | – |
 
-## Getting started
+## Put it live — free (about 10 minutes)
 
-Requires **Node.js 22.13 or newer**, because it uses the built-in `node:sqlite`. No other database needs to be installed.
+You need a free **Supabase** account and this GitHub repository. Nothing here costs money.
+
+### 1. Create the database (Supabase)
+1. Go to **https://supabase.com**, sign in with GitHub, and click **New project**. Choose any name, set a database password (keep it safe) and pick the region closest to you (e.g. *Mumbai*).
+2. When the project is ready, open **SQL Editor → New query**. Copy **everything** from [`supabase/setup.sql`](supabase/setup.sql), paste it, and click **Run**. You should see *Success*.
+3. Open **Project Settings → API** (called **API Keys** / **Data API** in some layouts) and copy two values:
+   - **Project URL**, e.g. `https://abcdxyz.supabase.co`
+   - **anon public** key, a long text starting with `eyJ…` (or `sb_publishable_…`)
+4. Optional but recommended: **Authentication → Sign In / Providers** → turn **off** “Allow new users to sign up”. Staff accounts are created inside the app, so public sign-ups are never needed.
+
+### 2. Publish the website (GitHub Pages)
+1. In this GitHub repository open **Settings → Secrets and variables → Actions → Variables tab → New repository variable** and add:
+   - `SUPABASE_URL` = your Project URL
+   - `SUPABASE_ANON_KEY` = your anon public key
+2. Open **Settings → Pages** and set **Source** to **GitHub Actions**.
+3. Open the **Actions** tab → **Deploy to GitHub Pages** → **Run workflow**. (It also runs automatically on every push to `main`.)
+4. When it finishes (green tick), your app is live at:
+
+   **https://jasscod.github.io/CAKERY/**
+
+5. Open the link. The first screen asks you to **create the owner account** (your name, username, password). Then add your staff under **Staff & Access** and share the link with them.
+
+> GitHub Pages is free for **public** repositories. If the repository is private, make it public under **Settings → General → Danger Zone → Change visibility** (your data stays private — it is in Supabase, protected by logins, not in the code).
+> Supabase's free plan pauses a project after about a week with **no** activity; daily use keeps it awake. If it ever pauses, click **Restore** in the Supabase dashboard.
+
+### Is the public key safe?
+Yes. The *anon* key only lets the browser call the functions in `setup.sql`. Every table is locked, and each function checks who is signed in and what their role allows before reading or changing anything. A cook cannot see money even by calling the database directly.
+
+## Updating
+- Change the code on `main`; GitHub Pages redeploys automatically.
+- If `supabase/setup.sql` changed, run it again in the Supabase SQL Editor. It is safe to re-run and keeps your data.
+
+## Backups
+**Settings → Backup** downloads every record as a JSON file. Invoice files stay in the Supabase Storage bucket `documents`.
+
+## Local preview & tests (optional, for developers)
 
 ```bash
 npm install
-npm start                # http://localhost:3000
+npm start      # http://localhost:5173 — fill in public/config.js with your Supabase URL + anon key first
+npm test       # runs supabase/setup.sql in an in-memory Postgres and checks every role's access
 ```
-
-On first start it creates the owner account: **username `owner` / password `owner123`**. You will be asked to change the password right away. You can set a different first password with `CAKERY_OWNER_PASSWORD=... npm start`.
-
-### Try it with demo data
-
-```bash
-npm run seed:demo        # 4 months of sample sales, expenses, vendors, production, orders
-```
-
-Demo staff logins (password `cakery123`): `manager`, `cashier`, `cook`, `kitchen`, `support`.
-
-### Other commands
-
-```bash
-npm run dev                                   # auto-restart on code changes
-npm test                                      # API + permission tests
-npm run reset-password -- <username> <newpw>  # if someone is locked out
-```
-
-### Configuration
-
-| Env var | Default | Meaning |
-|---|---|---|
-| `PORT` | `3000` | HTTP port |
-| `CAKERY_DATA_DIR` | `./data` | Where the database (`cakery.db`) and uploaded files are kept |
-| `CAKERY_OWNER_PASSWORD` | `owner123` | Password for the auto-created owner (first run only) |
-| `TRUST_PROXY` | – | Set to `1` behind a reverse proxy / HTTPS host (already set in the Dockerfile) |
-| `NODE_ENV=production` | – | Sends cookies over HTTPS only (set `CAKERY_INSECURE_COOKIE=1` if you serve over plain HTTP on a LAN) |
-
-## Put it live on Railway
-
-1. Go to **https://railway.com**, click **Login → GitHub**, and choose a plan (Hobby, about $5/month).
-2. Click **New Project → Deploy from GitHub repo** and pick **JassCod/CAKERY**. Railway finds `railway.json` and builds with the `Dockerfile`.
-3. In the new service, open **Variables** and add `CAKERY_OWNER_PASSWORD` = the password you want for the `owner` login.
-4. **Important: keep your data.** Right-click the service → **Attach Volume** and set the mount path to **`/var/data`**. The database and invoices are stored here; without a volume they are lost on every redeploy.
-5. Open **Settings → Networking → Generate Domain**. You get a link like `https://cakery-production.up.railway.app`. That is your live app.
-6. Open the link, sign in as `owner`, and add your staff under **Staff & Access**.
-
-Every push to `main` redeploys automatically. Any other host works too: use the `Dockerfile`, mount a volume at `/var/data`, and set `CAKERY_OWNER_PASSWORD`.
-
-### Backups
-
-Download a full database backup from **Settings → Backup**, and also copy the `data/uploads` folder, which holds the invoice files. Everything lives in the `data/` directory.
 
 ## Project structure
 
 ```
-server/            Express API
-  db.js            schema, defaults, first-run owner
-  permissions.js   roles + permission catalogue + default access
-  auth.js          sessions, permission checks
-  routes/          auth, users, items, production, closing, expenses, vendors, orders, reports, admin
-public/            Single-page app (no build step)
-  js/app.js        router + layout;  js/login.js  login screen;  js/pages/*  each screen
-  css/app.css      design system (light & dark)
-scripts/           demo seeder, password reset
-test/              API tests (node --test)
+public/                 The website published to GitHub Pages (no build step)
+  index.html, config.js   page shell + your Supabase URL/key
+  js/app.js, js/login.js  router, layout, login / first-run setup
+  js/backend.js           connects each screen to Supabase
+  js/pages/*              one file per screen
+  css/app.css             design system (light & dark)
+  vendor/                 Supabase and Chart.js libraries
+supabase/setup.sql      tables, roles & permissions, all business logic, storage rules
+test/db.test.mjs        database tests (PGlite)
+.github/workflows/pages.yml  test + deploy to GitHub Pages
 ```

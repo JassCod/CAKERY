@@ -2,19 +2,19 @@ import { api, can, qs } from '../state.js';
 import { esc, icon, fmtDate, todayStr, toast, openModal, confirmDialog, empty, debounce, fieldHtml } from '../ui.js';
 
 const DOC_TYPES = { invoice: 'Invoice', receipt: 'Receipt', quotation: 'Quotation', contract: 'Contract', credit_note: 'Credit note', other: 'Other' };
-const fileUrl = (vendorId, d, download) => `/api/vendors/${vendorId}/documents/${d.id}/file${download ? '?download=1' : ''}`;
 const size = b => (b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB');
 
 export function docCard(d, vendorId) {
   const ext = (d.original_name.split('.').pop() || '').toUpperCase();
   const isImg = /^image\/(png|jpe?g|webp|gif)$/.test(d.mime || '');
+  const view = esc(d.url || '#'), dl = esc(d.download_url || d.url || '#');
   return `<div class="doc" data-doc="${d.id}" data-vendor="${vendorId}">
-    <a class="thumb" href="${fileUrl(vendorId, d)}" target="_blank" rel="noopener">${isImg ? `<img src="${fileUrl(vendorId, d)}" alt="" loading="lazy">` : `<span class="ext">${esc(ext || 'FILE')}</span>`}</a>
+    <a class="thumb" href="${view}" target="_blank" rel="noopener">${isImg && d.url ? `<img src="${view}" alt="" loading="lazy">` : `<span class="ext">${esc(ext || 'FILE')}</span>`}</a>
     <b title="${esc(d.title)}">${esc(d.title)}</b>
     <div class="small muted">${esc(DOC_TYPES[d.doc_type] || d.doc_type)}${d.bill_no ? ' · Bill #' + esc(d.bill_no) : ''}<br>${esc(fmtDate(d.doc_date || d.created_at))} · ${size(d.size || 0)}</div>
     <div class="row" style="gap:6px">
-      <a class="btn btn-sm" href="${fileUrl(vendorId, d)}" target="_blank" rel="noopener">${icon('eye')} View</a>
-      <a class="btn btn-sm btn-ghost btn-icon" href="${fileUrl(vendorId, d, true)}" title="Download">${icon('download')}</a>
+      <a class="btn btn-sm" href="${view}" target="_blank" rel="noopener">${icon('eye')} View</a>
+      <a class="btn btn-sm btn-ghost btn-icon" href="${dl}" title="Download">${icon('download')}</a>
       ${can('vendors.manage') ? `<button class="btn btn-sm btn-ghost btn-icon" data-deldoc title="Delete">${icon('trash')}</button>` : ''}
     </div>
   </div>`;
@@ -64,6 +64,7 @@ export function uploadModal(vendor, bills = [], billId = null, vendorList = []) 
           if (!vid) { err.textContent = 'Choose a vendor'; err.classList.remove('hidden'); return; }
           if (!files.length) { err.textContent = 'Choose at least one file'; err.classList.remove('hidden'); return; }
           const fd = new FormData();
+          fd.append('vendor_name', vendor ? vendor.name : (vendorList.find(v => String(v.id) === String(vid)) || {}).name || 'vendor');
           files.forEach(f => fd.append('files', f));
           for (const k of ['title', 'doc_type', 'doc_date', 'bill_id']) if (form.elements[k] && form.elements[k].value) fd.append(k, form.elements[k].value);
           e.target.disabled = true; e.target.innerHTML = '<span class="spinner"></span> Uploading…';

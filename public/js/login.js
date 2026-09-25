@@ -44,7 +44,7 @@ const CAKE_SVG = `
 
 const SPRINKLE_COLORS = ['#ffd166', '#f58fb0', '#7ad3c0', '#ffffff', '#c7a4ff'];
 
-export function renderLogin(root, { shopName = 'Cakery', tagline = '', onSuccess }) {
+export function renderLogin(root, { shopName = 'Cakery', tagline = '', onSuccess, needsSetup = false, notConfigured = false }) {
   const sprinkles = Array.from({ length: 22 }, (_, i) => {
     const left = (i * 37) % 100;
     const dur = 9 + (i * 7) % 11;
@@ -56,7 +56,7 @@ export function renderLogin(root, { shopName = 'Cakery', tagline = '', onSuccess
   <div class="login">
     <section class="login-art">
       ${sprinkles}
-      <div class="login-brand"><img src="/img/logo.svg" alt=""><b>${esc(shopName)}</b></div>
+      <div class="login-brand"><img src="img/logo.svg" alt=""><b>${esc(shopName)}</b></div>
       <div class="login-headline">
         <h1>Every layer,<br>every <em>crumb</em>,<br>accounted for.</h1>
         <p>${esc(tagline || 'The back office of your bakery')} — stock, kitchen output, daily cash &amp; online closing, vendor dues and monthly history in one place.</p>
@@ -67,25 +67,44 @@ export function renderLogin(root, { shopName = 'Cakery', tagline = '', onSuccess
     </section>
     <section class="login-panel">
       <button class="btn btn-ghost btn-icon login-theme" data-theme-toggle aria-label="Toggle theme">${icon('moon')}</button>
-      <form class="login-card" novalidate autocomplete="on">
-        <div class="hello">Welcome <em>back</em></div>
-        <div class="sub">Sign in with the account your shop owner gave you.</div>
+      ${notConfigured ? `<div class="login-card">
+        <div class="hello">Almost <em>ready</em></div>
+        <div class="sub">This app is not connected to its database yet.</div>
+        <ol style="padding-left:18px;color:var(--text-2);line-height:1.7">
+          <li>Create a free project at <a href="https://supabase.com" target="_blank" rel="noopener">supabase.com</a>.</li>
+          <li>In Supabase → <b>SQL Editor</b>, run the file <code>supabase/setup.sql</code> from the repository.</li>
+          <li>In GitHub → repository <b>Settings → Secrets and variables → Actions → Variables</b>, add
+            <code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code> (from Supabase → Project Settings → API).</li>
+          <li>Re-run the <b>Deploy to GitHub Pages</b> action, then reload this page.</li>
+        </ol>
+      </div>` : `<form class="login-card" novalidate autocomplete="on">
+        <div class="hello">${needsSetup ? 'Set up your <em>shop</em>' : 'Welcome <em>back</em>'}</div>
+        <div class="sub">${needsSetup ? 'First time here — create the owner account. You can add staff after signing in.' : 'Sign in with the account your shop owner gave you.'}</div>
         <div class="login-error hidden" role="alert"></div>
+        ${needsSetup ? `<div class="field">
+          <label for="lg-name">Your name</label>
+          <div class="input-icon">${icon('user')}<input id="lg-name" class="input" name="name" autocomplete="name" required></div>
+        </div>` : ''}
         <div class="field">
           <label for="lg-user">Username</label>
-          <div class="input-icon">${icon('user')}<input id="lg-user" class="input" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required></div>
+          <div class="input-icon">${icon('user')}<input id="lg-user" class="input" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required ${needsSetup ? 'value="owner"' : ''}></div>
         </div>
         <div class="field">
           <label for="lg-pass">Password</label>
-          <div class="input-icon">${icon('lock')}<input id="lg-pass" class="input" type="password" name="password" autocomplete="current-password" required>
+          <div class="input-icon">${icon('lock')}<input id="lg-pass" class="input" type="password" name="password" autocomplete="${needsSetup ? 'new-password' : 'current-password'}" required>
             <button type="button" class="btn btn-ghost btn-sm btn-icon toggle-pw" aria-label="Show password">${icon('eye')}</button></div>
         </div>
-        <button class="btn btn-primary" type="submit">Sign in ${icon('chevRight')}</button>
+        ${needsSetup ? `<div class="field">
+          <label for="lg-pass2">Confirm password</label>
+          <div class="input-icon">${icon('lock')}<input id="lg-pass2" class="input" type="password" name="confirm" autocomplete="new-password" required></div>
+        </div>` : ''}
+        <button class="btn btn-primary" type="submit">${needsSetup ? 'Create owner account' : 'Sign in'} ${icon('chevRight')}</button>
         <div class="login-foot">${icon('shield')} Access is based on your role. Every action is recorded.</div>
-      </form>
+      </form>`}
     </section>
   </div>`;
 
+  if (notConfigured) return;
   const form = $('.login-card', root);
   const err = $('.login-error', root);
   const pw = $('#lg-pass', root);
@@ -100,16 +119,23 @@ export function renderLogin(root, { shopName = 'Cakery', tagline = '', onSuccess
     const username = form.username.value.trim();
     const password = form.password.value;
     if (!username || !password) { showErr('Enter your username and password.'); return; }
-    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Signing in…';
+    if (needsSetup) {
+      if (!form.name.value.trim()) { showErr('Enter your name.'); return; }
+      if (password.length < 6) { showErr('Password must be at least 6 characters.'); return; }
+      if (password !== form.confirm.value) { showErr('Passwords do not match.'); return; }
+    }
+    const label = btn.innerHTML;
+    btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> ${needsSetup ? 'Creating…' : 'Signing in…'}`;
     try {
-      await api('/auth/login', { method: 'POST', body: { username, password } });
+      if (needsSetup) await api('/auth/setup', { method: 'POST', body: { name: form.name.value.trim(), username, password, confirm: form.confirm.value } });
+      else await api('/auth/login', { method: 'POST', body: { username, password } });
       root.querySelector('.login').classList.add('leaving');
       setTimeout(onSuccess, 350);
     } catch (ex) {
       showErr(ex.message);
-      btn.disabled = false; btn.innerHTML = `Sign in ${icon('chevRight')}`;
+      btn.disabled = false; btn.innerHTML = label;
     }
   });
   function showErr(m) { err.textContent = m; err.classList.remove('hidden'); err.style.animation = 'none'; void err.offsetWidth; err.style.animation = ''; }
-  setTimeout(() => $('#lg-user', root).focus(), 400);
+  setTimeout(() => $(needsSetup ? '#lg-name' : '#lg-user', root).focus(), 400);
 }

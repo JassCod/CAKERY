@@ -44,9 +44,9 @@ export default async function staff(el) {
 
     bindTabs();
     el.querySelector('[data-add]').onclick = () => edit();
-    el.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => edit(users.find(u => u.id === Number(b.dataset.edit))));
+    el.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => edit(users.find(u => String(u.id) === b.dataset.edit)));
     el.querySelectorAll('[data-off]').forEach(b => b.onclick = async () => {
-      const u = users.find(x => x.id === Number(b.dataset.off));
+      const u = users.find(x => String(x.id) === b.dataset.off);
       if (!(await confirmDialog(`Disable ${u.name}? They will be signed out and cannot log in.`, { okText: 'Disable' }))) return;
       try { await api(`/users/${u.id}`, { method: 'DELETE' }); toast('Account disabled'); load(); } catch (e) { toast(e.message, 'error'); }
     });

@@ -1,6 +1,7 @@
 import { state, api, can } from './state.js';
 import { esc, icon, avatar, destroyCharts, toast, fmtDate, todayStr, $ } from './ui.js';
 import { renderLogin } from './login.js';
+import { configured } from './backend.js';
 
 // route -> { title, group, icon, perms (any), load() }
 const ROUTES = {
@@ -58,7 +59,7 @@ async function showLogin() {
   let info = {};
   try { info = await api('/auth/public-info'); } catch { /* offline */ }
   renderLogin($('#app'), {
-    shopName: info.shop_name, tagline: info.tagline,
+    shopName: info.shop_name, tagline: info.tagline, needsSetup: !!info.needs_setup, notConfigured: !configured,
     onSuccess: async () => { await loadMe(); startApp(); },
   });
 }
@@ -84,7 +85,7 @@ function renderShell() {
   $('#app').innerHTML = `
   <div class="shell">
     <aside class="sidebar" aria-label="Main navigation">
-      <div class="side-brand"><img src="/img/logo.svg" alt=""><div><b>${esc(state.settings.shop_name || 'Cakery')}</b><small>${esc(state.settings.tagline || 'Bakery management')}</small></div></div>
+      <div class="side-brand"><img src="img/logo.svg" alt=""><div><b>${esc(state.settings.shop_name || 'Cakery')}</b><small>${esc(state.settings.tagline || 'Bakery management')}</small></div></div>
       <nav class="nav">
         ${Object.entries(groups).map(([g, items]) => `<div class="nav-group">${esc(g)}</div>` +
           items.map(([key, r]) => `<a href="#/${key}" data-route="${key}">${icon(r.icon)}<span>${esc(r.title)}</span><span class="badge hidden" data-badge="${key}"></span></a>`).join('')).join('')}

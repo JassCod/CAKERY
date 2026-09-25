@@ -1,3 +1,4 @@
+import { call } from './backend.js';
 // Global client state + API client.
 export const state = { user: null, permissions: new Set(), settings: {}, access: [] };
 
@@ -8,19 +9,14 @@ export class ApiError extends Error {
 }
 
 export async function api(path, { method = 'GET', body, form } = {}) {
-  const opts = { method, headers: { 'X-Requested-With': 'cakery' }, credentials: 'same-origin' };
-  if (form) opts.body = form;
-  else if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
-  let res;
-  try { res = await fetch('/api' + path, opts); }
-  catch { throw new ApiError(0, 'Cannot reach the server. Check your connection.'); }
-  let data = null;
-  try { data = await res.json(); } catch { /* non-JSON */ }
-  if (!res.ok) {
-    if (res.status === 401 && !path.startsWith('/auth/')) window.dispatchEvent(new Event('cakery:unauthorized'));
-    throw new ApiError(res.status, (data && data.error) || `Request failed (${res.status})`);
+  try {
+    return await call(path, { method, body, form });
+  } catch (e) {
+    const status = e.status || 0;
+    if (status === 401 && !path.startsWith('/auth/')) window.dispatchEvent(new Event('cakery:unauthorized'));
+    const offline = !status && /fetch|network/i.test(e.message || '');
+    throw new ApiError(status, offline ? 'Cannot reach the server. Check your internet connection.' : (e.message || 'Request failed'));
   }
-  return data;
 }
 
 export const qs = obj => {

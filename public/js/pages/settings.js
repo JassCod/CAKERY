@@ -62,11 +62,23 @@ export default async function settings(el) {
       el.innerHTML = tabs + `
       <div class="card card-pad" style="max-width:640px">
         <div class="row" style="gap:16px;flex-wrap:nowrap;align-items:flex-start"><span class="avatar tone-blue" style="width:48px;height:48px">${icon('database')}</span>
-        <div><h3>Download a full backup</h3><p class="muted">One file containing every record — items, production, closings, expenses, vendors, bills, payments, orders, staff and the activity log.
-          Keep it somewhere safe (Google Drive, a pen drive). Uploaded invoice files live in the <code>data/uploads</code> folder on the server — copy that folder too.</p>
-          <a class="btn btn-primary" href="/api/admin/backup">${icon('download')} Download backup</a></div></div>
+        <div><h3>Download a full backup</h3><p class="muted">One file (JSON) containing every record — items, production, closings, expenses, vendors, bills, payments, orders, staff and the activity log.
+          Keep it somewhere safe (Google Drive, a pen drive). Invoice files stay in your Supabase Storage bucket <code>documents</code>.</p>
+          <button class="btn btn-primary" data-backup>${icon('download')} Download backup</button></div></div>
       </div>`;
       bindTabs();
+      el.querySelector('[data-backup]').onclick = async e => {
+        e.target.disabled = true;
+        try {
+          const data = await api('/admin/backup');
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' }));
+          a.download = `cakery-backup-${new Date().toISOString().slice(0, 10)}.json`;
+          a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+          toast('Backup downloaded');
+        } catch (ex) { toast(ex.message, 'error'); }
+        e.target.disabled = false;
+      };
     }
   }
 

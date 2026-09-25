@@ -1,0 +1,273 @@
+// Runs supabase/setup.sql inside an in-memory Postgres (PGlite) with a small
+// stand-in for Supabase's auth + storage schemas, then exercises the app's
+// database functions as different staff roles.
+import { test, before } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { PGlite } from '@electric-sql/pglite';
+import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
+
+const SUPABASE_STUB = `
+create role anon; create role authenticated;
+create schema extensions; create extension pgcrypto schema extensions;
+create schema auth;
+create table auth.users (instance_id uuid, id uuid primary key, aud text, role text, email text unique, encrypted_password text,
+  email_confirmed_at timestamptz, raw_app_meta_data jsonb, raw_user_meta_data jsonb, created_at timestamptz, updated_at timestamptz,
+  confirmation_token text, recovery_token text, email_change_token_new text, email_change text, banned_until timestamptz);
+create table auth.identities (id uuid primary key, user_id uuid references auth.users(id) on delete cascade, provider_id text not null,
+  identity_data jsonb, provider text, last_sign_in_at timestamptz, created_at timestamptz, updated_at timestamptz);
+create table auth.sessions (id uuid primary key default gen_random_uuid(), user_id uuid);
+create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
+create schema storage;
+create table storage.buckets (id text primary key, name text, public boolean, file_size_limit bigint);
+create table storage.objects (id uuid default gen_random_uuid(), bucket_id text, name text);
+alter table storage.objects enable row level security;
+`;
+
+let db;
+const today = () => db.query('select public.app_today()::text d').then(r => r.rows[0].d);
+
+async function as(uid) { await db.query(`select set_config('request.jwt.claim.sub', $1, false)`, [uid || '']); }
+
+async function rpc(fn, args = {}) {
+  const keys = Object.keys(args);
+  const sql = `select public.${fn}(${keys.map((k, i) => `${k} => $${i + 1}`).join(', ')}) as r`;
+  const vals = keys.map(k => (args[k] !== null && typeof args[k] === 'object' && !Array.isArray(args[k]) ? JSON.stringify(args[k]) : args[k]));
+  return (await db.query(sql, vals)).rows[0].r;
+}
+async function fails(fn, args, pattern) {
+  await assert.rejects(() => rpc(fn, args), e => { assert.match(e.message, pattern); return true; });
+}
+// Mimics Supabase Auth's password sign-in.
+async function login(username, password) {
+  const r = await db.query(`select id from auth.users where email = public.staff_email($1)
+    and encrypted_password = extensions.crypt($2, encrypted_password) and (banned_until is null or banned_until < now())`, [username, password]);
+  if (!r.rows[0]) throw new Error('Invalid login credentials');
+  await as(r.rows[0].id);
+  await rpc('after_login');
+  return r.rows[0].id;
+}
+
+const ids = {};
+
+before(async () => {
+  db = new PGlite({ extensions: { pgcrypto } });
+  await db.exec(SUPABASE_STUB);
+  const sql = readFileSync(new URL('../supabase/setup.sql', import.meta.url), 'utf8');
+  await db.exec(sql);
+  await db.exec(sql); // must be safe to run twice
+});
+
+test('first-run setup creates the owner once', async () => {
+  await as(null);
+  assert.equal((await rpc('public_info')).needs_setup, true);
+  await rpc('setup_owner', { p_username: 'owner', p_password: 'owner-pass', p_name: 'Shop Owner' });
+  await fails('setup_owner', { p_username: 'evil', p_password: 'evil-pass', p_name: 'X' }, /already complete/);
+  assert.equal((await rpc('public_info')).needs_setup, false);
+  await assert.rejects(() => login('owner', 'wrong'));
+  ids.owner = await login('owner', 'owner-pass');
+  const me = await rpc('me');
+  assert.equal(me.user.role, 'owner');
+  assert.ok(me.permissions.includes('roles.manage'));
+  assert.equal(me.settings.currency, '₹');
+});
+
+test('not signed in: everything is refused', async () => {
+  await as(null);
+  await fails('dashboard', {}, /sign in/);
+  await fails('items_list', { p: {} }, /sign in/);
+});
+
+test('owner creates staff; manager cannot create a manager', async () => {
+  await as(ids.owner);
+  for (const role of ['manager', 'cashier', 'cook', 'kitchen_staff', 'customer_service']) {
+    await as(ids.owner);
+    await rpc('user_create', { p: { name: role, username: role, password: 'secret1', role } });
+    ids[role] = await login(role, 'secret1');
+  }
+  await as(ids.manager);
+  await fails('user_create', { p: { name: 'x', username: 'xx2', password: 'secret1', role: 'manager' } }, /cannot manage/);
+  await rpc('user_create', { p: { name: 'y', username: 'yy2', password: 'secret1', role: 'cook' } });
+  await fails('user_create', { p: { name: 'z', username: 'yy2', password: 'secret1', role: 'cook' } }, /already taken/);
+  await as(ids.cook);
+  const me = await rpc('me');
+  assert.equal(me.user.must_change_password, true);
+});
+
+test('role permissions are enforced', async () => {
+  await as(ids.cook);
+  await fails('expenses_list', { p: {} }, /do not have access/);
+  await fails('closings_month', {}, /do not have access/);
+  await fails('report_monthly', {}, /do not have access/);
+  const dash = await rpc('dashboard');
+  assert.equal(dash.financials, undefined, 'cook must not see money figures');
+  assert.ok(dash.production);
+  await as(ids.cashier);
+  await fails('users_list', {}, /do not have access/);
+  await as(ids.customer_service);
+  await fails('expense_save', { p_id: null, p: { category: 'x', amount: 5 } }, /do not have access/);
+  await as(ids.manager);
+  await fails('audit_list', { p: {} }, /do not have access/);
+});
+
+test('owner can change role permissions; manager cannot', async () => {
+  await as(ids.owner);
+  const roles = (await rpc('roles_list')).roles;
+  const cook = roles.find(r => r.key === 'cook');
+  await rpc('role_update', { p_role: 'cook', p_permissions: [...cook.permissions, 'reports.view'] });
+  await as(ids.cook); await rpc('report_monthly');
+  await as(ids.owner); await rpc('role_update', { p_role: 'cook', p_permissions: cook.permissions });
+  await as(ids.cook); await fails('report_monthly', {}, /do not have access/);
+  await as(ids.manager); await fails('role_update', { p_role: 'cook', p_permissions: [] }, /do not have access/);
+});
+
+test('disabled staff cannot sign in or act', async () => {
+  await as(ids.owner);
+  const u = await rpc('user_create', { p: { name: 'Temp', username: 'temp1', password: 'secret1', role: 'cashier' } });
+  await rpc('user_deactivate', { p_id: u.id });
+  await assert.rejects(() => login('temp1', 'secret1'));
+  await as(u.id);
+  await fails('dashboard', {}, /sign in/);
+});
+
+test('password change checks the current password', async () => {
+  await as(ids.cook);
+  await fails('change_password', { p_current: 'nope', p_new: 'newpass1' }, /incorrect/);
+  await rpc('change_password', { p_current: 'secret1', p_new: 'newpass1' });
+  await login('cook', 'newpass1');
+  assert.equal((await rpc('me')).user.must_change_password, false);
+});
+
+let productId;
+test('items, stock and production', async () => {
+  await as(ids.owner);
+  productId = (await rpc('item_save', { p_id: null, p: { name: 'Choco Pastry', type: 'product', sell_price: 80, cost_price: 30, stock_qty: 5 } })).id;
+  await as(ids.cook);
+  await fails('item_save', { p_id: null, p: { name: 'Hack' } }, /do not have access/);
+  const list = await rpc('items_list', { p: {} });
+  assert.equal(list.items[0].cost_price, undefined, 'cook does not see cost');
+  await as(ids.kitchen_staff);
+  assert.equal(Number((await rpc('item_stock', { p_id: productId, p: { direction: 'out', qty: 2, reason: 'wastage' } })).balance), 3);
+
+  await as(ids.cook);
+  const p = await rpc('production_create', { p: { item_id: productId, qty_made: 40 } });
+  await fails('production_create', { p: { item_id: productId, qty_made: 1, date: '2020-01-01' } }, /today or yesterday/);
+  await as(ids.customer_service);
+  await rpc('production_sales', { p_id: p.id, p: { qty_sold: 35, qty_wasted: 2 } });
+  await as(ids.cook);
+  const pl = await rpc('production_list', { p: {} });
+  assert.equal(Number(pl.summary[0].sold), 35);
+  assert.equal(pl.logs[0].sell_price, undefined, 'cook does not see prices');
+  await as(ids.kitchen_staff);
+  await fails('production_update', { p_id: p.id, p: { qty_made: 1 } }, /own recent entries/);
+});
+
+let vendorId;
+test('vendor bills, payments (auto-expense) and pending amount', async () => {
+  await as(ids.owner);
+  vendorId = (await rpc('vendor_save', { p_id: null, p: { name: 'Sharma Flour', opening_balance: 1000 } })).id;
+  await rpc('bill_save', { p_vendor: vendorId, p_bill: null, p: { bill_no: 'A1', amount: 5000, bill_date: '2026-01-05', due_date: '2026-01-20' } });
+  await rpc('bill_save', { p_vendor: vendorId, p_bill: null, p: { bill_no: 'A2', amount: 3000, bill_date: '2026-01-10' } });
+  await as(ids.cashier);
+  const pay = await rpc('payment_create', { p_vendor: vendorId, p: { amount: 2500, payment_mode: 'cash' } });
+  await as(ids.owner);
+  let d = await rpc('vendor_detail', { p_id: vendorId });
+  assert.equal(Number(d.vendor.pending), 6500);
+  const a1 = d.bills.find(b => b.bill_no === 'A1');
+  assert.equal(Number(a1.paid), 1500, 'on-account payment clears opening balance first, then oldest bill');
+  assert.equal(a1.status, 'partial');
+  assert.equal(d.ledger.at(-1).balance, 6500);
+  const vp = await rpc('expenses_list', { p: { from: '2000-01-01', to: '2100-01-01', category: 'Vendor Payment' } });
+  assert.equal(Number(vp.totals.total), 2500);
+  await rpc('payment_delete', { p_vendor: vendorId, p_payment: pay.id });
+  assert.equal(Number((await rpc('expenses_list', { p: { from: '2000-01-01', to: '2100-01-01', category: 'Vendor Payment' } })).totals.total), 0);
+  d = await rpc('vendor_detail', { p_id: vendorId });
+  assert.equal(Number(d.vendor.pending), 9000);
+  const dash = await rpc('dashboard');
+  assert.ok(dash.financials.overdue_bills.some(b => b.bill_no === 'A1'));
+  await as(ids.cook);
+  await fails('vendors_list', { p: {} }, /do not have access/);
+});
+
+test('documents: path must belong to the vendor folder', async () => {
+  await as(ids.cashier);
+  await fails('document_add', { p_vendor: vendorId, p: { files: [{ path: `vendors/999-x/a.pdf`, name: 'a.pdf' }] } }, /Invalid file path/);
+  await rpc('document_add', { p_vendor: vendorId, p: { doc_type: 'invoice', files: [{ path: `vendors/${vendorId}-sharma-flour/2026_a.pdf`, name: 'a.pdf', mime: 'application/pdf', size: 10 }] } });
+  const docs = (await rpc('documents_all', { p: {} })).documents;
+  assert.equal(docs.length, 1);
+  assert.equal(docs[0].vendor_name, 'Sharma Flour');
+  await fails('document_delete', { p_vendor: vendorId, p_doc: docs[0].id }, /do not have access/);
+  await as(ids.owner);
+  assert.match((await rpc('document_delete', { p_vendor: vendorId, p_doc: docs[0].id })).storage_path, /^vendors\//);
+});
+
+test('daily closing computes expected cash and difference', async () => {
+  const t = await today();
+  await as(ids.cashier);
+  await rpc('expense_save', { p_id: null, p: { category: 'Staff Food', amount: 200, payment_mode: 'cash' } });
+  await rpc('expense_save', { p_id: null, p: { category: 'Electricity', amount: 1000, payment_mode: 'online' } });
+  await rpc('closing_save', { p: { opening_cash: 1000, cash_sales: 5000, online_sales: 7000, cash_counted: 5750 } });
+  await fails('closing_save', { p: { date: '2020-01-01', cash_sales: 1, online_sales: 1 } }, /today or yesterday/);
+  await fails('closing_delete', { p_id: 1 }, /do not have access/);
+  await as(ids.owner);
+  const c = (await rpc('closing_day', { p_date: t })).closing;
+  assert.equal(Number(c.total_sales), 12000);
+  assert.equal(Number(c.expenses_total), 1200);
+  assert.equal(Number(c.expected_cash), 5800);
+  assert.equal(Number(c.cash_difference), -50);
+  assert.equal(Number(c.net), 10800);
+  const month = await rpc('closings_month', { p_month: t.slice(0, 7) });
+  assert.equal(Number(month.totals.total_sales), 12000);
+  const rep = await rpc('report_monthly', { p_month: t.slice(0, 7) });
+  assert.equal(Number(rep.summary.sales.total), 12000);
+  assert.equal(rep.daily.length >= 28, true);
+  const hist = await rpc('report_history', { p_months: 3 });
+  assert.equal(Number(hist.months.at(-1).sales), 12000);
+  const dash = await rpc('dashboard');
+  assert.equal(Number(dash.financials.today.closing.cash_sales), 5000);
+  assert.equal(dash.financials.series.length, 30);
+});
+
+test('expenses: staff can only edit their own recent entries', async () => {
+  await as(ids.cashier);
+  const e = await rpc('expense_save', { p_id: null, p: { category: 'Transport', amount: 50 } });
+  await fails('expense_save', { p_id: null, p: { category: 'Old', amount: 5, date: '2020-01-01' } }, /today or yesterday/);
+  await as(ids.manager);
+  await rpc('expense_save', { p_id: e.id, p: { category: 'Transport', amount: 60 } });
+  await fails('expense_save', { p_id: null, p: { category: 'Bad', amount: -1 } }, /at least/);
+});
+
+test('orders: customer service creates, cook moves status but cannot cancel', async () => {
+  await as(ids.customer_service);
+  const o = await rpc('order_save', { p_id: null, p: { customer_name: 'Ananya', item_desc: 'Truffle 1kg', delivery_date: '2030-01-01', total_amount: 900, advance_paid: 400 } });
+  assert.match(o.order_no, /^ORD-\d{6}-001$/);
+  const o2 = await rpc('order_save', { p_id: null, p: { customer_name: 'B', item_desc: 'X', delivery_date: '2030-01-02' } });
+  assert.match(o2.order_no, /-002$/);
+  await as(ids.cook);
+  await rpc('order_status', { p_id: o.id, p_status: 'in_kitchen' });
+  await fails('order_status', { p_id: o.id, p_status: 'cancelled' }, /Only order managers/);
+  const list = (await rpc('orders_list', { p: {} })).orders;
+  assert.equal(list[0].total_amount, undefined, 'cook does not see order money');
+});
+
+test('settings, activity log and backup', async () => {
+  await as(ids.owner);
+  const s = await rpc('settings_save', { p: { shop_name: 'Sweet Crumbs', currency: '₹', timezone: 'Asia/Kolkata', expense_categories: ['Rent', 'Rent', ' Gas '] } });
+  assert.equal(s.settings.shop_name, 'Sweet Crumbs');
+  assert.deepEqual(s.settings.expense_categories.sort(), ['Gas', 'Rent']);
+  await fails('settings_save', { p: { shop_name: 'X', currency: '₹', timezone: 'Mars/Base' } }, /Unknown timezone/);
+  const logs = (await rpc('audit_list', { p: {} })).logs;
+  assert.ok(logs.some(l => l.action === 'closing_created'));
+  assert.ok(logs.some(l => l.action === 'vendor_payment_deleted'));
+  const b = await rpc('backup_export');
+  assert.ok(b.expenses.length >= 3);
+  await as(ids.manager);
+  await fails('backup_export', {}, /do not have access/);
+});
+
+test('tables are locked against direct access', async () => {
+  const r = await db.query(`select has_table_privilege('anon', 'public.expenses', 'select') a, has_table_privilege('authenticated', 'public.profiles', 'select') b,
+    has_function_privilege('anon', 'public.dashboard()', 'execute') c, has_function_privilege('authenticated', 'public.create_login(text,text,text,text,text,boolean)', 'execute') d,
+    has_function_privilege('anon', 'public.setup_owner(text,text,text)', 'execute') e`);
+  assert.deepEqual(r.rows[0], { a: false, b: false, c: false, d: false, e: true });
+});
