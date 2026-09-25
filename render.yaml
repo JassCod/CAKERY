@@ -1,0 +1,14 @@
+# One-click deploy on Render: https://render.com/deploy?repo=https://github.com/JassCod/CAKERY
+services:
+  - type: web
+    name: cakery
+    runtime: docker
+    plan: starter            # a paid plan is required for the persistent disk that keeps your data
+    healthCheckPath: /api/health
+    envVars:
+      - key: CAKERY_OWNER_PASSWORD
+        sync: false          # Render asks you for the owner's first password during setup
+    disk:
+      name: cakery-data
+      mountPath: /var/data   # database + uploaded invoices live here and survive restarts
+      sizeGB: 1

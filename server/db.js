@@ -251,7 +251,8 @@ function init() {
     db.prepare(`INSERT INTO users (name, username, password_hash, role, must_change_password)
                 VALUES (?, ?, ?, 'owner', 1)`)
       .run('Shop Owner', 'owner', bcrypt.hashSync(pw, 10));
-    console.log('[cakery] Created default owner account -> username: owner  password: ' + pw);
+    console.log('[cakery] Created owner account -> username: owner  password: '
+      + (process.env.CAKERY_OWNER_PASSWORD ? '(the one you set in CAKERY_OWNER_PASSWORD)' : pw));
   }
 
   db.prepare("DELETE FROM sessions WHERE expires_at < datetime('now')").run();

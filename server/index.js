@@ -9,7 +9,9 @@ const { loadUser } = require('./auth');
 function createApp() {
   const app = express();
   app.disable('x-powered-by');
-  app.set('trust proxy', 'loopback');
+  // Behind a hosting proxy (Render, Railway…) set TRUST_PROXY=1 so client IPs and HTTPS are detected.
+  const tp = process.env.TRUST_PROXY;
+  app.set('trust proxy', tp ? (/^\d+$/.test(tp) ? Number(tp) : tp) : 'loopback');
 
   app.use((req, res, next) => {
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');
@@ -28,6 +30,7 @@ function createApp() {
     next();
   });
 
+  app.get('/api/health', (_req, res) => res.json({ ok: true }));
   app.use('/api/auth', require('./routes/auth'));
   app.use('/api/users', require('./routes/users'));
   app.use('/api/items', require('./routes/items'));
