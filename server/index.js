@@ -9,7 +9,7 @@ const { loadUser } = require('./auth');
 function createApp() {
   const app = express();
   app.disable('x-powered-by');
-  // Behind a hosting proxy (Render, Railway…) set TRUST_PROXY=1 so client IPs and HTTPS are detected.
+  // Behind a hosting proxy (nginx, cloud hosts…) set TRUST_PROXY=1 so client IPs and HTTPS are detected.
   const tp = process.env.TRUST_PROXY;
   app.set('trust proxy', tp ? (/^\d+$/.test(tp) ? Number(tp) : tp) : 'loopback');
 

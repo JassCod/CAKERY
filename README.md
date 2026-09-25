@@ -69,21 +69,12 @@ npm run reset-password -- <username> <newpw>  # if someone is locked out
 | `PORT` | `3000` | HTTP port |
 | `CAKERY_DATA_DIR` | `./data` | Where the database (`cakery.db`) and uploaded files are kept |
 | `CAKERY_OWNER_PASSWORD` | `owner123` | Password for the auto-created owner (first run only) |
-| `TRUST_PROXY` | – | Set to `1` behind a hosting proxy (already set in the Dockerfile) |
+| `TRUST_PROXY` | – | Set to `1` behind a reverse proxy / HTTPS host (already set in the Dockerfile) |
 | `NODE_ENV=production` | – | Sends cookies over HTTPS only (set `CAKERY_INSECURE_COOKIE=1` if you serve over plain HTTP on a LAN) |
 
-## Put it online (Render, one click)
+## Running it on a server
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/JassCod/CAKERY)
-
-1. Click the button above. Sign in to Render with GitHub and allow it to access the **CAKERY** repository.
-2. When asked for `CAKERY_OWNER_PASSWORD`, type the password you want for the `owner` login.
-3. Click **Apply**. After the build finishes (about 3 minutes), your link is shown at the top, for example `https://cakery-xxxx.onrender.com`.
-4. Open the link, sign in as `owner`, and create accounts for your staff under **Staff & Access**.
-
-`render.yaml` uses the **Starter** plan (about $7/month) with a 1 GB persistent disk mounted at `/var/data`. The disk is what keeps your database and invoices safe across restarts. Free plans have no disk and would lose data, so they are not suitable. To use your own domain (e.g. `app.yourcakery.com`), go to Render → Settings → Custom Domains.
-
-Any other Docker host works too (Railway, Fly.io, a VPS). Use the included `Dockerfile`, attach a volume at `/var/data`, and set `CAKERY_OWNER_PASSWORD`.
+Any machine with Node.js 22.13+ can run it (`npm install && npm start`). A `Dockerfile` is included: mount a volume at `/var/data` so the database and invoices survive restarts, and set `CAKERY_OWNER_PASSWORD` for the first owner login.
 
 ### Backups
 
