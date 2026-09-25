@@ -1,0 +1,25 @@
+{
+  "name": "cakery",
+  "version": "1.0.0",
+  "description": "Cakery — bakery & cake shop management system (inventory, production, daily closing, expenses, vendors, invoices, reports, role-based staff access).",
+  "main": "server/index.js",
+  "private": true,
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server/index.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch server/index.js",
+    "seed:demo": "node --disable-warning=ExperimentalWarning scripts/seed-demo.js",
+    "reset-password": "node --disable-warning=ExperimentalWarning scripts/reset-password.js",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "chart.js": "^4.5.1",
+    "cookie-parser": "^1.4.7",
+    "express": "^5.2.1",
+    "multer": "^2.4.0"
+  }
+}
