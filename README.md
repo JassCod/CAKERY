@@ -72,9 +72,16 @@ npm run reset-password -- <username> <newpw>  # if someone is locked out
 | `TRUST_PROXY` | – | Set to `1` behind a reverse proxy / HTTPS host (already set in the Dockerfile) |
 | `NODE_ENV=production` | – | Sends cookies over HTTPS only (set `CAKERY_INSECURE_COOKIE=1` if you serve over plain HTTP on a LAN) |
 
-## Running it on a server
+## Put it live on Railway
 
-Any machine with Node.js 22.13+ can run it (`npm install && npm start`). A `Dockerfile` is included: mount a volume at `/var/data` so the database and invoices survive restarts, and set `CAKERY_OWNER_PASSWORD` for the first owner login.
+1. Go to **https://railway.com**, click **Login → GitHub**, and choose a plan (Hobby, about $5/month).
+2. Click **New Project → Deploy from GitHub repo** and pick **JassCod/CAKERY**. Railway finds `railway.json` and builds with the `Dockerfile`.
+3. In the new service, open **Variables** and add `CAKERY_OWNER_PASSWORD` = the password you want for the `owner` login.
+4. **Important: keep your data.** Right-click the service → **Attach Volume** and set the mount path to **`/var/data`**. The database and invoices are stored here; without a volume they are lost on every redeploy.
+5. Open **Settings → Networking → Generate Domain**. You get a link like `https://cakery-production.up.railway.app`. That is your live app.
+6. Open the link, sign in as `owner`, and add your staff under **Staff & Access**.
+
+Every push to `main` redeploys automatically. Any other host works too: use the `Dockerfile`, mount a volume at `/var/data`, and set `CAKERY_OWNER_PASSWORD`.
 
 ### Backups
 
