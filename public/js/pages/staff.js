@@ -249,15 +249,38 @@ async function staffProfile(el, id, ctx) {
     openModal({
       title: `Upload for ${s.name}`,
       body: `<form class="form-grid" novalidate><div class="form-error hidden full"></div>
-        <div class="full"><input class="input" type="file" name="files" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.doc,.docx"></div>
+        <div class="full"><div class="drop" data-drop tabindex="0" role="button" aria-label="Choose files">
+          <div class="em-ico" style="width:52px;height:52px;border-radius:16px;background:var(--primary-50);color:var(--primary);display:grid;place-items:center;margin:0 auto 10px">${icon('upload')}</div>
+          <b style="color:var(--text)">Drag &amp; drop files here</b><div>or <u>click to choose</u> · photos from your phone camera work too</div>
+          <div class="small" style="margin-top:4px">PDF, JPG, PNG, Word · up to 15 MB each</div></div>
+          <div data-files class="stack" style="gap:6px;margin-top:10px"></div>
+          <input type="file" name="files" multiple hidden accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.doc,.docx"></div>
         ${fieldHtml({ name: 'doc_type', label: 'Type', type: 'select', options: Object.entries(DOC_TYPES), value: 'id_proof' })}
         ${fieldHtml({ name: 'title', label: 'Title', placeholder: 'defaults to file name' })}</form>`,
       foot: `<button class="btn" data-close>Cancel</button><button class="btn btn-primary" data-go>${icon('upload')} Upload</button>`,
       onMount: m => {
         const form = m.el.querySelector('form');
         const err = m.el.querySelector('.form-error');
+        const drop = m.el.querySelector('[data-drop]');
+        const input = form.elements.files;
+        const listEl = m.el.querySelector('[data-files]');
+        let files = [];
+        const size = b => (b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB');
+        const show = () => {
+          listEl.innerHTML = files.map((f, i) => `<div class="row" style="gap:10px;flex-wrap:nowrap;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2)">
+            ${/^image\//.test(f.type) ? `<img src="${URL.createObjectURL(f)}" alt="" style="width:36px;height:36px;object-fit:cover;border-radius:8px">` : `<span class="avatar sm tone-rose">${icon('file')}</span>`}
+            <div style="flex:1;min-width:0"><b class="small" style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.name)}</b><span class="small muted">${size(f.size)}</span></div>
+            <button type="button" class="btn btn-sm btn-ghost btn-icon" data-rm="${i}" aria-label="Remove">${icon('x')}</button></div>`).join('');
+          listEl.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { files.splice(+b.dataset.rm, 1); show(); });
+        };
+        const add = list => { files = [...files, ...list]; err.classList.add('hidden'); show(); };
+        drop.onclick = () => input.click();
+        drop.onkeydown = ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); input.click(); } };
+        input.onchange = () => { add([...input.files]); input.value = ''; };
+        drop.ondragover = ev => { ev.preventDefault(); drop.classList.add('over'); };
+        drop.ondragleave = () => drop.classList.remove('over');
+        drop.ondrop = ev => { ev.preventDefault(); drop.classList.remove('over'); add([...ev.dataTransfer.files]); };
         m.el.querySelector('[data-go]').onclick = async e => {
-          const files = [...form.elements.files.files];
           if (!files.length) { err.textContent = 'Choose at least one file'; err.classList.remove('hidden'); return; }
           const fd = new FormData();
           files.forEach(f => fd.append('files', f));
