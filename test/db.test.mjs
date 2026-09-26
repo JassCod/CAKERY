@@ -131,6 +131,36 @@ test('staff can use an email address as their login', async () => {
   await fails('user_create', { p: { name: 'Bad', username: 'not an email@', password: 'secret1', role: 'cook' } }, /Username/);
 });
 
+test('co-owners: full access, but cannot touch owners added before them', async () => {
+  await as(ids.owner);
+  const co = await rpc('user_create', { p: { name: 'Co Owner', username: 'coowner', password: 'secret1', role: 'owner' } });
+  const coId = await login('coowner', 'secret1');
+  assert.equal(coId, co.id);
+  const me = await rpc('me');
+  assert.ok(me.permissions.includes('roles.manage') && me.permissions.includes('settings.manage'));
+  await rpc('backup_export');
+  // co-owner can manage staff and add a newer owner…
+  await rpc('user_update', { p_id: ids.cashier, p: { name: 'cashier', role: 'cashier', active: true } });
+  const newer = await rpc('user_create', { p: { name: 'Newest Owner', username: 'newowner', password: 'secret1', role: 'owner' } });
+  await rpc('user_update', { p_id: newer.id, p: { name: 'Newest Owner 2', role: 'owner', active: true } });
+  // …but cannot edit, disable, demote or reset the original owner
+  await fails('user_update', { p_id: ids.owner, p: { name: 'Hacked', role: 'owner', active: true } }, /before you/);
+  await fails('user_update', { p_id: ids.owner, p: { name: 'Shop Owner', role: 'cook' } }, /before you/);
+  await fails('user_update', { p_id: ids.owner, p: { name: 'Shop Owner', role: 'owner', password: 'newpass1' } }, /before you/);
+  await fails('user_deactivate', { p_id: ids.owner }, /before you/);
+  const users = (await rpc('users_list')).users;
+  assert.equal(users.find(u => u.id === ids.owner).can_manage, false);
+  assert.equal(users.find(u => u.id === newer.id).can_manage, true);
+  // the original owner can manage the co-owner, including demoting them
+  await as(ids.owner);
+  assert.equal((await rpc('users_list')).users.find(u => u.id === co.id).can_manage, true);
+  await rpc('user_update', { p_id: newer.id, p: { name: 'Newest Owner', role: 'manager', active: true } });
+  assert.equal((await rpc('users_list')).users.find(u => u.id === newer.id).owner_since, null);
+  // a manager still cannot create owners
+  await as(ids.manager);
+  await fails('user_create', { p: { name: 'x', username: 'mgrowner', password: 'secret1', role: 'owner' } }, /cannot manage/);
+});
+
 test('disabled staff cannot sign in or act', async () => {
   await as(ids.owner);
   const u = await rpc('user_create', { p: { name: 'Temp', username: 'temp1', password: 'secret1', role: 'cashier' } });

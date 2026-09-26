@@ -50,6 +50,10 @@ create table if not exists public.profiles (
   created_at timestamptz not null default now()
 );
 
+-- Co-owners: an owner may only manage owners who became owner AFTER them.
+alter table public.profiles add column if not exists owner_since timestamptz;
+update public.profiles set owner_since = created_at where role = 'owner' and owner_since is null;
+
 create table if not exists public.settings (
   key text primary key,
   value jsonb
@@ -463,8 +467,8 @@ begin
     '{"provider":"email","providers":["email"]}', jsonb_build_object('name', p_name), now(), now(), '', '', '', '');
   insert into auth.identities (id, user_id, provider_id, identity_data, provider, last_sign_in_at, created_at, updated_at)
   values (gen_random_uuid(), uid, uid::text, jsonb_build_object('sub', uid::text, 'email', em, 'email_verified', true), 'email', now(), now(), now());
-  insert into public.profiles (id, name, username, role, phone, must_change_password)
-  values (uid, p_name, lower(p_username), p_role, p_phone, p_must_change);
+  insert into public.profiles (id, name, username, role, phone, must_change_password, owner_since)
+  values (uid, p_name, lower(p_username), p_role, p_phone, p_must_change, case when p_role = 'owner' then clock_timestamp() end);
   return uid;
 end $$;
 
@@ -545,7 +549,7 @@ begin
   my_rank := public.rank_of((public.current_profile()).role);
   return jsonb_build_object(
     'roles', (select jsonb_agg(jsonb_build_object('key', r.key, 'label', r.label, 'rank', r.rank, 'color', r.color,
-        'permissions', to_jsonb(public.perms_for(r.key)), 'manageable', r.rank < my_rank,
+        'permissions', to_jsonb(public.perms_for(r.key)), 'manageable', r.rank < my_rank or my_rank >= 100,
         'users', (select count(*) from public.profiles u where u.role = r.key and u.active)) order by r.sort) from public.roles r),
     'groups', (select jsonb_agg(jsonb_build_object('group', g.grp, 'items', g.items) order by g.s)
       from (select grp, min(sort) s, jsonb_agg(jsonb_build_array(key, label) order by sort) items from public.permission_catalog group by grp) g));
@@ -572,16 +576,43 @@ language plpgsql stable security definer set search_path = public as $$
 begin
   perform public.require_perm('users.manage');
   return jsonb_build_object('users', coalesce((select jsonb_agg(jsonb_build_object('id', id, 'name', name, 'username', username,
-    'role', role, 'phone', phone, 'active', active, 'last_login', last_login, 'created_at', created_at) order by active desc, name)
-    from public.profiles), '[]'));
+    'role', role, 'phone', phone, 'active', active, 'last_login', last_login, 'created_at', created_at, 'owner_since', owner_since,
+    'can_manage', id <> auth.uid() and public.can_manage_profile(pr)) order by active desc, name)
+    from public.profiles pr), '[]'));
 end $$;
 
+-- May the signed-in user give someone this role? Owners may give any role (including owner).
 create or replace function public.assert_can_manage(p_role text) returns void
 language plpgsql stable security definer set search_path = public as $$
 begin
   if not exists (select 1 from public.roles where key = p_role) then raise exception 'Invalid role'; end if;
+  if (public.current_profile()).role = 'owner' then return; end if;
   if public.rank_of(p_role) >= public.rank_of((public.current_profile()).role) then
     raise exception 'You cannot manage % accounts', (select label from public.roles where key = p_role) using errcode = '42501';
+  end if;
+end $$;
+
+-- May the signed-in user edit / disable this account?
+-- Owners can manage everyone except owners who became owner before (or at the same time as) them.
+create or replace function public.can_manage_profile(t public.profiles) returns boolean
+language plpgsql stable security definer set search_path = public as $$
+declare me public.profiles := public.current_profile();
+begin
+  if me.id is null or t.id = me.id then return false; end if;
+  if t.role = 'owner' then
+    return me.role = 'owner' and coalesce(t.owner_since, t.created_at) > coalesce(me.owner_since, me.created_at);
+  end if;
+  return me.role = 'owner' or public.rank_of(t.role) < public.rank_of(me.role);
+end $$;
+
+create or replace function public.assert_can_manage_user(t public.profiles) returns void
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.can_manage_profile(t) then
+    if t.role = 'owner' then
+      raise exception 'You cannot change an owner who became owner before you' using errcode = '42501';
+    end if;
+    raise exception 'You cannot manage % accounts', (select label from public.roles where key = t.role) using errcode = '42501';
   end if;
 end $$;
 
@@ -605,7 +636,7 @@ begin
   select * into ex from public.profiles where id = p_id;
   if ex.id is null then raise exception 'User not found'; end if;
   if p_id = auth.uid() then raise exception 'Use "My Account" to edit your own profile'; end if;
-  perform public.assert_can_manage(ex.role);
+  perform public.assert_can_manage_user(ex);
   new_role := coalesce(nullif(p ->> 'role', ''), ex.role);
   perform public.assert_can_manage(new_role);
   act := public.v_bool(p, 'active', ex.active);
@@ -613,6 +644,7 @@ begin
   if pw is not null and length(pw) < 6 then raise exception 'Password must be at least 6 characters'; end if;
   update public.profiles set name = public.v_str(p, 'name', true, 80, 'Name'), role = new_role,
     phone = public.v_str(p, 'phone', false, 30), active = act,
+    owner_since = case when new_role <> 'owner' then null when ex.role <> 'owner' then clock_timestamp() else owner_since end,
     must_change_password = case when pw is not null then true else must_change_password end
   where id = p_id;
   update auth.users set
@@ -621,7 +653,8 @@ begin
     updated_at = now()
   where id = p_id;
   if not act or pw is not null or new_role <> ex.role then delete from auth.sessions where user_id = p_id; end if;
-  perform public.audit('user_updated', 'user', p_id::text, jsonb_build_object('role', new_role, 'active', act, 'password_reset', pw is not null));
+  perform public.audit(case when new_role = 'owner' and ex.role <> 'owner' then 'user_made_owner' else 'user_updated' end,
+    'user', p_id::text, jsonb_build_object('role', new_role, 'active', act, 'password_reset', pw is not null));
   return jsonb_build_object('ok', true);
 end $$;
 
@@ -633,7 +666,7 @@ begin
   select * into ex from public.profiles where id = p_id;
   if ex.id is null then raise exception 'User not found'; end if;
   if p_id = auth.uid() then raise exception 'You cannot delete yourself'; end if;
-  perform public.assert_can_manage(ex.role);
+  perform public.assert_can_manage_user(ex);
   update public.profiles set active = false where id = p_id;
   update auth.users set banned_until = now() + interval '100 years' where id = p_id;
   delete from auth.sessions where user_id = p_id;

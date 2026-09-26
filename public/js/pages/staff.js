@@ -32,9 +32,9 @@ export default async function staff(el) {
     <div class="row mb" style="gap:8px">${rolesData.roles.map(r => `<span class="badge" style="background:${r.color}1f;color:${r.color};padding:6px 12px">${esc(r.label)} · ${counts[r.key] || 0}</span>`).join('')}</div>
     <div class="card">${users.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Phone</th><th>Last login</th><th>Status</th><th></th></tr></thead>
       <tbody>${users.map(u => {
-        const canEdit = u.id !== state.user.id && rolesData.roles.find(r => r.key === u.role)?.manageable;
+        const canEdit = !!u.can_manage;
         return `<tr style="${u.active ? '' : 'opacity:.55'}"><td><span class="row" style="gap:10px;flex-wrap:nowrap">${avatar(u.name, 'sm')}<b>${esc(u.name)}</b>${u.id === state.user.id ? '<span class="badge rose">You</span>' : ''}</span></td>
-        <td class="small">${esc(u.username)}</td><td>${roleBadge(u.role)}</td><td class="small">${esc(u.phone || '—')}</td>
+        <td class="small">${esc(u.username)}</td><td>${roleBadge(u.role)}${u.role === 'owner' && !u.can_manage && u.id !== state.user.id ? ` <span class="badge" title="Became owner before you — only they can change their account">${icon('lock')} senior</span>` : ''}</td><td class="small">${esc(u.phone || '—')}</td>
         <td class="small muted">${u.last_login ? esc(fmtDateTime(u.last_login)) : 'Never'}</td>
         <td>${u.active ? '<span class="badge green dot">Active</span>' : '<span class="badge dot">Disabled</span>'}</td>
         <td><div class="actions">${canEdit ? `<button class="btn btn-sm btn-ghost btn-icon" data-edit="${u.id}" title="Edit">${icon('edit')}</button>
@@ -57,7 +57,8 @@ export default async function staff(el) {
       title: u ? `Edit ${u.name}` : 'Add staff member',
       fields: [
         { name: 'name', label: 'Full name', value: u?.name, required: true },
-        { name: 'role', label: 'Role', type: 'select', options: manageable.map(x => [x.key, x.label]), value: u?.role || 'cashier', required: true },
+        { name: 'role', label: 'Role', type: 'select', options: manageable.map(x => [x.key, x.label]), value: u?.role || 'cashier', required: true,
+          hint: state.user.role === 'owner' ? 'Owner = full access. A new owner can do everything except change owners added before them.' : '' },
         ...(u ? [] : [{ name: 'username', label: 'Username', required: true, placeholder: 'e.g. ravi.k', hint: 'Used to sign in' }]),
         { name: 'phone', label: 'Phone', type: 'tel', value: u?.phone || '' },
         { name: 'password', label: u ? 'Reset password' : 'Temporary password', type: 'text', required: !u, placeholder: u ? 'leave empty to keep' : 'min 6 characters', hint: 'They will be asked to change it on first login' },
