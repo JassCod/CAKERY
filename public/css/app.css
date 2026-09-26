@@ -476,3 +476,7 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .quick-form { display: grid; grid-template-columns: 2fr 1fr 1fr 2fr auto; gap: 12px; align-items: end; }
 @media (max-width: 900px) { .quick-form { grid-template-columns: 1fr 1fr; } .quick-form > :first-child, .quick-form > :nth-child(4) { grid-column: 1 / -1; } .quick-form .btn { grid-column: 1 / -1; } }
 .badge svg.i { width: 12px; height: 12px; }
+/* Header/cell alignment must match (".table th" would otherwise force left) */
+.table th.right, .table td.right { text-align: right; }
+.table th.center, .table td.center { text-align: center; }
+.table td.num, .table td .num { font-variant-numeric: tabular-nums; }
