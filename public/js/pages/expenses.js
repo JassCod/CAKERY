@@ -18,7 +18,8 @@ export default async function expenses(el, { query }) {
     el.querySelector('[data-add]').onclick = () => edit();
   }
 
-  function render({ expenses: rows, byCategory, totals }) {
+  function render({ expenses: rows, byCategory, totals, pending }) {
+    const pend = pending || { total: 0, count: 0, items: [] };
     const maxCat = Math.max(1, ...byCategory.map(c => c.total));
     el.innerHTML = `
     <div class="toolbar">
@@ -40,16 +41,29 @@ export default async function expenses(el, { query }) {
       <div class="card stat"><div class="label">Biggest category</div><div class="value" style="font-size:20px">${esc(byCategory[0] ? byCategory[0].category : '—')}</div><div class="foot">${byCategory[0] ? money(byCategory[0].total) : ''}</div></div>
     </div>
 
+    ${pend.count ? `<div class="card mb" style="border-color:var(--warning)">
+      <div class="card-head" style="background:var(--warning-50)"><h3 style="color:var(--warning)">${icon('alert')} Pending to pay</h3>
+        <span class="badge amber">${pend.count} bill${pend.count > 1 ? 's' : ''} · ${money(pend.total)}</span><div class="spacer"></div>
+        <span class="small muted">Not counted in totals until paid</span></div>
+      <ul class="list">${pend.items.map(e => {
+        const late = e.due_date && e.due_date < todayStr();
+        return `<li><div class="grow"><b>${esc(e.category)}${e.vendor_name || e.paid_to ? ' · ' + esc(e.vendor_name || e.paid_to) : ''}</b>
+          <small>${e.description ? esc(e.description) + ' · ' : ''}Bill ${esc(fmtDay(e.date))}${e.due_date ? ` · <span class="${late ? 'neg' : ''}">${late ? 'overdue since' : 'due'} ${esc(fmtDay(e.due_date))}</span>` : ''}</small></div>
+          <b class="num neg">${money(e.amount)}</b>
+          ${can('expenses.create', 'expenses.manage') ? `<button class="btn btn-sm btn-primary" data-paynow="${e.id}">${icon('check')} Mark as paid</button>` : ''}
+          ${canModify(e) ? `<button class="btn btn-sm btn-ghost btn-icon" data-pedit="${e.id}" title="Edit">${icon('edit')}</button>` : ''}</li>`;
+      }).join('')}</ul></div>` : ''}
+
     <div class="grid g-2-1">
       <div class="card">
         ${rows.length ? `<div class="table-wrap"><table class="table">
           <thead><tr><th>Date</th><th>Category</th><th>Details</th><th>Mode</th><th class="right">Amount</th><th>By</th><th></th></tr></thead>
           <tbody>${rows.map(e => `<tr>
             <td class="nowrap">${esc(fmtDay(e.date))}</td>
-            <td><span class="badge rose">${esc(e.category)}</span></td>
+            <td><span class="badge rose">${esc(e.category)}</span>${e.status === 'pending' ? ' <span class="badge amber">not paid</span>' : ''}</td>
             <td style="max-width:320px"><div class="strong">${esc(e.vendor_name || e.paid_to || '')}</div><div class="small muted">${esc(e.description || '')}${e.reference ? ' · Ref ' + esc(e.reference) : ''}</div></td>
-            <td class="small nowrap">${esc(MODE_LABEL[e.payment_mode] || e.payment_mode)}</td>
-            <td class="right num strong nowrap">${money(e.amount)}</td>
+            <td class="small nowrap">${e.status === 'pending' ? '—' : esc(MODE_LABEL[e.payment_mode] || e.payment_mode)}</td>
+            <td class="right num strong nowrap" ${e.status === 'pending' ? 'style="opacity:.6"' : ''}>${money(e.amount)}</td>
             <td class="small nowrap">${esc(e.created_by_name || '—')}</td>
             <td><div class="actions">${canModify(e) ? `<button class="btn btn-sm btn-ghost btn-icon" data-edit="${e.id}" title="Edit">${icon('edit')}</button><button class="btn btn-sm btn-ghost btn-icon" data-del="${e.id}" title="Delete">${icon('trash')}</button>`
               : e.source === 'vendor_payment' ? `<a class="btn btn-sm btn-ghost" href="#/vendors/${e.vendor_id}" title="Recorded from vendor payment">${icon('truck')}</a>` : ''}</div></td>
@@ -74,6 +88,8 @@ export default async function expenses(el, { query }) {
     const add = el.querySelector('[data-add]');
     if (add) add.onclick = () => edit();
     el.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => edit(rows.find(r => r.id === Number(b.dataset.edit))));
+    el.querySelectorAll('[data-pedit]').forEach(b => b.onclick = () => edit(pend.items.find(r => r.id === Number(b.dataset.pedit))));
+    el.querySelectorAll('[data-paynow]').forEach(b => b.onclick = () => markPaid(pend.items.find(r => r.id === Number(b.dataset.paynow))));
     el.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
       const e = rows.find(r => r.id === Number(b.dataset.del));
       if (!(await confirmDialog(`Delete ${e.category} expense of ${money(e.amount)} on ${fmtDay(e.date)}?`))) return;
@@ -85,8 +101,24 @@ export default async function expenses(el, { query }) {
     ]);
   }
 
+  async function markPaid(e) {
+    const manage = can('expenses.manage');
+    const r = await formModal({
+      title: `Pay: ${e.category}${e.vendor_name || e.paid_to ? ' · ' + (e.vendor_name || e.paid_to) : ''}`, size: 'narrow',
+      intro: `<div class="money" style="margin-bottom:14px"><small>Amount</small><b>${money(e.amount)}</b></div>`,
+      fields: [
+        { name: 'date', label: 'Paid on', type: 'date', value: todayStr(), required: true, full: true, attrs: `max="${todayStr()}" ${manage ? '' : `min="${addDays(todayStr(), -1)}"`}` },
+        { name: 'payment_mode', label: 'Paid by', type: 'select', options: Object.entries(MODE_LABEL), value: 'cash', full: true },
+        { name: 'reference', label: 'Reference (UTR / receipt no.)', value: e.reference || '', full: true },
+      ],
+      submitText: 'Mark as paid',
+      onSubmit: v => api(`/expenses/${e.id}/paid`, { method: 'POST', body: v }),
+    });
+    if (r) { toast('Marked as paid — now counted in expenses'); load(); }
+  }
+
   function canModify(e) {
-    if (e.source === 'vendor_payment') return false;
+    if (e.source === 'vendor_payment' || e.source === 'salary_payment') return false;
     return can('expenses.manage') || (e.created_by === state.user.id && e.date >= addDays(todayStr(), -1));
   }
 
@@ -98,15 +130,26 @@ export default async function expenses(el, { query }) {
         { name: 'date', label: 'Date', type: 'date', value: e ? e.date : (query.date || todayStr()), required: true, attrs: `max="${todayStr()}" ${manage ? '' : `min="${addDays(todayStr(), -1)}"`}` },
         { name: 'amount', label: 'Amount', type: 'money', value: e ? e.amount : '', required: true },
         { name: 'category', label: 'Category', type: 'datalist', options: cats, value: e ? e.category : '', required: true, placeholder: 'e.g. Raw Materials' },
+        { name: 'status', label: 'Payment status', type: 'select', value: e ? e.status || 'paid' : 'paid',
+          options: [['paid', '✅ Paid now'], ['pending', '⏳ Not paid yet (pending)']] },
         { name: 'payment_mode', label: 'Paid by', type: 'select', options: Object.entries(MODE_LABEL), value: e ? e.payment_mode : 'cash' },
+        { name: 'due_date', label: 'Pay by (due date)', type: 'date', value: e ? e.due_date || '' : '' },
         { name: 'vendor_id', label: 'Vendor (optional)', type: 'select', placeholder: '— none —', options: vendors.map(v => [v.id, v.name]), value: e ? e.vendor_id || '' : '' },
         { name: 'paid_to', label: 'Paid to (if not a vendor)', value: e ? e.paid_to || '' : '', placeholder: 'e.g. electrician' },
         { name: 'description', label: 'Description', type: 'textarea', value: e ? e.description || '' : '', full: true, placeholder: 'What was this for?' },
         { name: 'reference', label: 'Reference / bill no.', value: e ? e.reference || '' : '', full: true },
       ],
+      onMount: (_m, form) => {
+        const sync = () => {
+          const pending = form.elements.status.value === 'pending';
+          form.elements.payment_mode.closest('.field').style.display = pending ? 'none' : '';
+          form.elements.due_date.closest('.field').style.display = pending ? '' : 'none';
+        };
+        form.elements.status.onchange = sync; sync();
+      },
       onSubmit: v => api(e ? `/expenses/${e.id}` : '/expenses', { method: e ? 'PUT' : 'POST', body: v }),
     });
-    if (r) { toast(e ? 'Expense updated' : 'Expense recorded'); load(); }
+    if (r) { toast(e ? 'Expense updated' : 'Expense saved'); load(); }
   }
 
   await load();

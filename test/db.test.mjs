@@ -277,6 +277,22 @@ test('expenses: staff can only edit their own recent entries', async () => {
   await fails('expense_save', { p_id: null, p: { category: 'Bad', amount: -1 } }, /at least/);
 });
 
+test('pending expenses are not counted until paid', async () => {
+  const t = await today();
+  await as(ids.owner);
+  const before = Number((await rpc('expenses_list', { p: { month: t.slice(0, 7) } })).totals.total);
+  const e = await rpc('expense_save', { p_id: null, p: { category: 'Electricity', amount: 3000, status: 'pending', due_date: t, description: 'Sept bill' } });
+  let list = await rpc('expenses_list', { p: { month: t.slice(0, 7) } });
+  assert.equal(Number(list.totals.total), before, 'pending not in totals');
+  assert.equal(Number(list.pending.total), 3000);
+  assert.equal(Number((await rpc('dashboard')).financials.pending_expenses.total), 3000);
+  await rpc('expense_mark_paid', { p_id: e.id, p: { payment_mode: 'online', reference: 'UPI123' } });
+  await fails('expense_mark_paid', { p_id: e.id, p: {} }, /already paid/);
+  list = await rpc('expenses_list', { p: { month: t.slice(0, 7) } });
+  assert.equal(Number(list.totals.total), before + 3000);
+  assert.equal(list.pending.count, 0);
+});
+
 test('orders: customer service creates, cook moves status but cannot cancel', async () => {
   await as(ids.customer_service);
   const o = await rpc('order_save', { p_id: null, p: { customer_name: 'Ananya', item_desc: 'Truffle 1kg', delivery_date: '2030-01-01', total_amount: 900, advance_paid: 400 } });

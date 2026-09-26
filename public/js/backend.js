@@ -194,6 +194,7 @@ const ROUTES = [
   ['POST', '/expenses', (_, b) => rpc('expense_save', { p_id: null, p: b })],
   ['PUT', '/expenses/:id', (p, b) => rpc('expense_save', { p_id: +p.id, p: b })],
   ['DELETE', '/expenses/:id', p => rpc('expense_delete', { p_id: +p.id })],
+  ['POST', '/expenses/:id/paid', (p, b) => rpc('expense_mark_paid', { p_id: +p.id, p: b })],
 
   ['GET', '/vendors', (_, __, q) => rpc('vendors_list', { p: q })],
   ['GET', '/vendors/:id', async p => { const d = await rpc('vendor_detail', { p_id: +p.id }); d.documents = await withSignedUrls(d.documents); return d; }],

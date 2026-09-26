@@ -95,7 +95,9 @@ export default async function dashboard(el) {
         </div>` : ''}
       </div>
       <div class="card">
-        <div class="card-head"><h3>Recent expenses</h3><div class="spacer"></div><a href="#/expenses" class="small">All expenses →</a></div>
+        <div class="card-head"><h3>Recent expenses</h3><div class="spacer"></div>
+          ${f.pending_expenses && f.pending_expenses.count ? `<a href="#/expenses" class="badge amber" title="Bills recorded but not paid yet">${f.pending_expenses.count} unpaid · ${money(f.pending_expenses.total, { dec: false })}</a>` : ''}
+          <a href="#/expenses" class="small">All expenses →</a></div>
         ${f.recent_expenses.length ? `<ul class="list">${f.recent_expenses.map(e => `
           <li>${iconBox('receipt', 'tone-rose')}<div class="grow"><b>${esc(e.category)}${e.vendor_name ? ' · ' + esc(e.vendor_name) : ''}</b><small>${esc(relDay(e.date))} · ${esc(e.description || e.payment_mode)}</small></div>
           <b class="num">${money(e.amount)}</b></li>`).join('')}</ul>` : empty('No expenses recorded', '', 'receipt')}
