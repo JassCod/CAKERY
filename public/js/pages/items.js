@@ -39,7 +39,7 @@ export default async function items(el, { query }) {
           return `<tr>
           <td><div class="strong">${esc(i.name)}</div><div class="small muted">${i.sku ? 'SKU ' + esc(i.sku) : ''}${i.notes ? (i.sku ? ' · ' : '') + esc(i.notes) : ''}</div></td>
           <td><span class="badge ${TYPE_BADGE[i.type]}">${esc(i.type)}</span></td>
-          <td class="small">${esc(i.category || '—')}</td>
+          <td class="small">${esc(i.category || '—')}${i.kitchen ? `<div class="muted">${esc(i.kitchen)}</div>` : ''}</td>
           <td class="right num nowrap"><b class="${low ? 'neg' : ''}">${num(i.stock_qty)}</b> <span class="muted small">${esc(i.unit)}</span>${low ? '<div><span class="badge red">Low</span></div>' : i.reorder_level ? `<div class="small muted">min ${num(i.reorder_level)}</div>` : ''}</td>
           ${showCost ? `<td class="right num small">${money(i.cost_price)}</td>` : ''}
           <td class="right num">${i.sell_price ? money(i.sell_price) : '<span class="muted">—</span>'}</td>
@@ -80,6 +80,7 @@ export default async function items(el, { query }) {
         { name: 'name', label: 'Item name', value: i?.name, required: true, full: true, placeholder: 'e.g. Black Forest Pastry' },
         { name: 'type', label: 'Type', type: 'select', options: Object.entries(TYPES), value: i?.type || f.type || 'product' },
         { name: 'category', label: 'Category', type: 'datalist', options: cats, value: i?.category || '' },
+        ...((state.settings.kitchens || []).length ? [{ name: 'kitchen', label: 'Made in kitchen', type: 'select', placeholder: '— none / bought in —', options: state.settings.kitchens, value: i?.kitchen || '' }] : []),
         { name: 'unit', label: 'Unit', type: 'datalist', options: ['pcs', 'kg', 'g', 'litre', 'ml', 'box', 'packet', 'dozen', 'tray'], value: i?.unit || 'pcs' },
         { name: 'sku', label: 'SKU / code', value: i?.sku || '' },
         { name: 'cost_price', label: 'Cost price (per unit)', type: 'money', value: i?.cost_price ?? '' },

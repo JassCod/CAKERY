@@ -198,6 +198,7 @@ function roleLine(d) {
 
 function quickActions(d) {
   const a = [];
+  if (can('attendance.self')) a.push(`<a class="btn btn-sm" href="#/attendance">${icon('calendar')} My attendance</a>`);
   if (can('production.log')) a.push(`<a class="btn btn-primary btn-sm" href="#/production">${icon('chef')} Log production</a>`);
   if (can('closing.create', 'closing.manage')) a.push(`<a class="btn ${d.closing_status && !d.closing_status.today_closed ? 'btn-primary' : ''} btn-sm" href="#/closing">${icon('cash')} ${d.closing_status && d.closing_status.today_closed ? 'Review today\'s closing' : 'Close today'}</a>`);
   if (can('expenses.create')) a.push(`<a class="btn btn-sm" href="#/expenses?new=1">${icon('receipt')} Add expense</a>`);

@@ -29,15 +29,16 @@ export default async function settings(el) {
       : `<div class="grid g2">
         ${catCard('expense_categories', 'Expense categories', s.expense_categories)}
         ${catCard('item_categories', 'Item categories', s.item_categories)}
+        ${catCard('kitchens', 'Kitchens', s.kitchens)}
       </div><div class="row mt"><div style="flex:1"></div><button class="btn btn-primary" data-save>${icon('check')} Save categories</button></div>`);
       bindTabs();
       el.querySelector('[data-save]').onclick = async () => {
         try {
           let body;
           if (tab === 'general') body = { ...s, ...readForm(el.querySelector('[data-form]')) };
-          else body = { ...s, expense_categories: lines('expense_categories'), item_categories: lines('item_categories') };
+          else body = { ...s, expense_categories: lines('expense_categories'), item_categories: lines('item_categories'), kitchens: lines('kitchens') };
           delete body.expense_categories_raw;
-          if (tab === 'general') { delete body.expense_categories; delete body.item_categories; }
+          if (tab === 'general') { delete body.expense_categories; delete body.item_categories; delete body.kitchens; }
           const r = await api('/admin/settings', { method: 'PUT', body });
           state.settings = r.settings;
           toast('Settings saved');

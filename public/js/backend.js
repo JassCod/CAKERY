@@ -63,6 +63,46 @@ async function withSignedUrls(docs) {
   return docs.map(doc => ({ ...doc, url: v[doc.storage_path] || null, download_url: d[doc.storage_path] || null }));
 }
 
+async function uploadStaffDocuments(userId, form) {
+  const files = await checkFiles(form);
+  const folder = `staff/${userId}-${slug(form.get('staff_name') || 'staff')}`;
+  const uploaded = await putFiles(folder, files);
+  try {
+    return await rpc('staff_doc_add', { p_user: userId, p: { files: uploaded, doc_type: form.get('doc_type') || 'id_proof', title: form.get('title') || '' } });
+  } catch (e) {
+    await sb.storage.from(BUCKET).remove(uploaded.map(u => u.path)).catch(() => {});
+    throw e;
+  }
+}
+
+async function checkFiles(form) {
+  const files = form.getAll('files').filter(f => f && f.name);
+  if (!files.length) throw new HttpError(400, 'Choose at least one file');
+  for (const f of files) {
+    const ext = (f.name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
+    if (!ALLOWED_EXT.includes(ext)) throw new HttpError(400, `File type not allowed: ${f.name}`);
+    if (f.size > MAX_FILE) throw new HttpError(400, `${f.name} is too large (max 15 MB)`);
+  }
+  return files;
+}
+
+async function putFiles(folder, files) {
+  const day = new Date().toISOString().slice(0, 10);
+  const uploaded = [];
+  for (const f of files) {
+    const ext = (f.name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
+    const base = slug(f.name.replace(/\.[^.]+$/, '')).slice(0, 40);
+    const path = `${folder}/${day}_${Math.random().toString(36).slice(2, 10)}_${base}${ext}`;
+    const { error } = await sb.storage.from(BUCKET).upload(path, f, { contentType: f.type || undefined, upsert: false });
+    if (error) {
+      if (uploaded.length) await sb.storage.from(BUCKET).remove(uploaded.map(u => u.path)).catch(() => {});
+      throw new HttpError(400, `Upload failed for ${f.name}: ${error.message}`);
+    }
+    uploaded.push({ path, name: f.name, mime: f.type || null, size: f.size });
+  }
+  return uploaded;
+}
+
 async function uploadDocuments(vendorId, form) {
   const files = form.getAll('files').filter(f => f && f.name);
   if (!files.length) throw new HttpError(400, 'Choose at least one file');
@@ -140,6 +180,7 @@ const ROUTES = [
 
   ['GET', '/production', (_, __, q) => rpc('production_list', { p: q })],
   ['POST', '/production', (_, b) => rpc('production_create', { p: b })],
+  ['POST', '/production/carry', (_, b) => rpc('production_carry_forward', { p_date: nullIfEmpty(b.date) })],
   ['PUT', '/production/:id', (p, b) => rpc('production_update', { p_id: +p.id, p: b })],
   ['PUT', '/production/:id/sales', (p, b) => rpc('production_sales', { p_id: +p.id, p: b })],
   ['DELETE', '/production/:id', p => rpc('production_delete', { p_id: +p.id })],
@@ -176,6 +217,36 @@ const ROUTES = [
   ['PUT', '/orders/:id', (p, b) => rpc('order_save', { p_id: +p.id, p: b })],
   ['PATCH', '/orders/:id/status', (p, b) => rpc('order_status', { p_id: +p.id, p_status: b.status })],
   ['DELETE', '/orders/:id', p => rpc('order_delete', { p_id: +p.id })],
+
+  ['GET', '/attendance/me', (_, __, q) => rpc('attendance_me', { p_month: nullIfEmpty(q.month) })],
+  ['POST', '/attendance/action', (_, b) => rpc('attendance_action', { p_action: b.action })],
+  ['GET', '/attendance/team', (_, __, q) => rpc('attendance_team', { p_date: nullIfEmpty(q.date) })],
+  ['GET', '/attendance/register', (_, __, q) => rpc('attendance_register', { p_month: nullIfEmpty(q.month) })],
+  ['GET', '/attendance/staff/:id', (p, __, q) => rpc('attendance_staff', { p_user: p.id, p_month: nullIfEmpty(q.month) })],
+  ['PUT', '/attendance/:id/:date', (p, b) => rpc('attendance_set', { p_user: p.id, p_date: p.date, p: b })],
+  ['GET', '/leaves', (_, __, q) => rpc('leaves_list', { p: q })],
+  ['POST', '/leaves', (_, b) => rpc('leave_request', { p: b })],
+  ['DELETE', '/leaves/:id', p => rpc('leave_cancel', { p_id: +p.id })],
+  ['POST', '/leaves/:id/decide', (p, b) => rpc('leave_decide', { p_id: +p.id, p_approve: !!b.approve, p_paid: b.paid !== false })],
+
+  ['GET', '/staff/:id', async p => {
+    const d = await rpc('staff_detail', { p_id: p.id });
+    d.documents = await withSignedUrls(d.documents);
+    return d;
+  }],
+  ['PUT', '/staff/:id', (p, b) => rpc('staff_save', { p_id: p.id, p: b })],
+  ['POST', '/staff/:id/documents', (p, _b, _q, form) => uploadStaffDocuments(p.id, form)],
+  ['DELETE', '/staff/:id/documents/:doc', async p => {
+    const r = await rpc('staff_doc_delete', { p_user: p.id, p_doc: +p.doc });
+    if (r.storage_path) await sb.storage.from(BUCKET).remove([r.storage_path]);
+    return { ok: true };
+  }],
+
+  ['GET', '/salary', (_, __, q) => rpc('salary_month', { p_month: nullIfEmpty(q.month) })],
+  ['GET', '/salary/:id', (p, __, q) => rpc('salary_staff', { p_user: p.id, p_month: nullIfEmpty(q.month) })],
+  ['PUT', '/salary/:id/final', (p, b) => rpc('salary_finalize', { p_user: p.id, p_month: b.month, p_amount: b.amount === '' || b.amount == null ? null : Number(b.amount), p_note: b.note || null })],
+  ['POST', '/salary/:id/payments', (p, b) => rpc('salary_pay', { p_user: p.id, p: b })],
+  ['DELETE', '/salary/payments/:id', p => rpc('salary_payment_delete', { p_id: +p.id })],
 
   ['GET', '/dashboard', () => rpc('dashboard')],
   ['GET', '/reports/monthly', (_, __, q) => rpc('report_monthly', { p_month: nullIfEmpty(q.month) })],

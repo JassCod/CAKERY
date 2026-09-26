@@ -305,6 +305,129 @@ test('settings, activity log and backup', async () => {
   await fails('backup_export', {}, /do not have access/);
 });
 
+test('kitchens: staff type a new item name and it is saved to that kitchen', async () => {
+  await as(ids.cook);
+  const r = await rpc('production_create', { p: { item_name: 'Rasmalai Cake', kitchen: 'Cake Kitchen', qty_made: 3 } });
+  assert.ok(r.id);
+  await rpc('production_create', { p: { item_name: 'rasmalai cake', kitchen: 'Cake Kitchen', qty_made: 2 } }); // same item, any case
+  await rpc('production_create', { p: { item_name: 'Veg Puff', kitchen: 'Snacks Kitchen', qty_made: 40 } });
+  const cakes = await rpc('items_list', { p: { kitchen: 'Cake Kitchen' } });
+  assert.deepEqual(cakes.items.map(i => i.name), ['Rasmalai Cake']);
+  const logs = await rpc('production_list', { p: { kitchen: 'Snacks Kitchen' } });
+  assert.equal(logs.logs.length, 1);
+  assert.equal(logs.logs[0].kitchen, 'Snacks Kitchen');
+});
+
+test('leftovers carry to the next day and stay in sync', async () => {
+  const t = await today();
+  const d0 = new Date(t + 'T00:00:00Z'); d0.setUTCDate(d0.getUTCDate() - 1);
+  const y = d0.toISOString().slice(0, 10);
+  await as(ids.owner);
+  const e = await rpc('production_create', { p: { item_name: 'Truffle Pastry', kitchen: 'Cake Kitchen', qty_made: 20, date: y } });
+  let r = await rpc('production_carry_forward', { p_date: t });
+  assert.equal(r.pending_counts, 1, 'cannot carry until sold count is entered');
+  await rpc('production_sales', { p_id: e.id, p: { qty_sold: 14, qty_wasted: 1 } });
+  r = await rpc('production_carry_forward', { p_date: t });
+  assert.equal(r.carried, 1);
+  assert.equal((await rpc('production_carry_forward', { p_date: t })).carried, 0, 'only once');
+  let row = (await rpc('production_list', { p: { date: t } })).logs.find(l => l.item_name === 'Truffle Pastry');
+  assert.equal(Number(row.carried_in), 5);
+  assert.equal(Number(row.qty_made), 0);
+  await rpc('production_sales', { p_id: e.id, p: { qty_sold: 16, qty_wasted: 1 } }); // yesterday corrected
+  row = (await rpc('production_list', { p: { date: t } })).logs.find(l => l.item_name === 'Truffle Pastry');
+  assert.equal(Number(row.carried_in), 3);
+});
+
+test('attendance: clock in, break, clock out; staff see only their own', async () => {
+  await as(ids.cashier);
+  await rpc('attendance_action', { p_action: 'in' });
+  await fails('attendance_action', { p_action: 'in' }, /already clocked in/);
+  await rpc('attendance_action', { p_action: 'break_start' });
+  const onBreak = (await rpc('attendance_me', {})).today;
+  assert.equal(onBreak.on_break, true);
+  await rpc('attendance_action', { p_action: 'break_end' });
+  const done = await rpc('attendance_action', { p_action: 'out' });
+  assert.ok(done.check_out);
+  assert.equal(done.breaks.length, 1);
+  await fails('attendance_action', { p_action: 'break_start' }, /already clocked out/);
+  const me = await rpc('attendance_me', {});
+  assert.equal(me.days.find(d => d.date === me.today_date).status, 'present');
+  await fails('attendance_team', {}, /do not have access/);
+  await fails('attendance_staff', { p_user: ids.cook }, /do not have access/);
+  await as(ids.manager);
+  const team = await rpc('attendance_team', {});
+  assert.equal(team.staff.find(s => s.user_id === ids.cashier).day.status, 'present');
+});
+
+test('leave requests are approved by manager and mark attendance', async () => {
+  const t = await today();
+  const d1 = new Date(t + 'T00:00:00Z'); d1.setUTCDate(d1.getUTCDate() + 2);
+  const d2 = new Date(d1); d2.setUTCDate(d2.getUTCDate() + 1);
+  const from = d1.toISOString().slice(0, 10), to = d2.toISOString().slice(0, 10);
+  await as(ids.cook);
+  const l = await rpc('leave_request', { p: { from_date: from, to_date: to, leave_type: 'sick', reason: 'Fever' } });
+  await fails('leave_decide', { p_id: l.id, p_approve: true, p_paid: true }, /do not have access/);
+  await as(ids.manager);
+  assert.equal((await rpc('leaves_list', { p: { status: 'pending' } })).leaves.length, 1);
+  await rpc('leave_decide', { p_id: l.id, p_approve: true, p_paid: false });
+  const reg = await rpc('attendance_staff', { p_user: ids.cook, p_month: from.slice(0, 7) });
+  const day = reg.days.find(d => d.date === from);
+  assert.equal(day.status, 'leave');
+  assert.equal(day.leave_paid, false);
+});
+
+test('salary: recommended from attendance, advances and pending', async () => {
+  const t = await today();
+  const month = t.slice(0, 7);
+  await as(ids.owner);
+  await rpc('staff_save', { p_id: ids.kitchen_staff, p: { monthly_salary: 15000, salary_type: 'monthly', date_of_joining: month + '-01', designation: 'Helper' } });
+  // Mark: 2 days present, 1 half day, rest absent so far
+  await rpc('attendance_set', { p_user: ids.kitchen_staff, p_date: month + '-01', p: { status: 'present', check_in: '09:00', check_out: '18:00' } });
+  await rpc('attendance_set', { p_user: ids.kitchen_staff, p_date: month + '-02', p: { status: 'present' } });
+  await rpc('attendance_set', { p_user: ids.kitchen_staff, p_date: month + '-03', p: { status: 'half_day' } });
+  const s = await rpc('salary_staff', { p_user: ids.kitchen_staff, p_month: month });
+  const dim = s.calc.days_in_month;
+  assert.equal(Number(s.calc.paid_days), 2.5);
+  assert.equal(Number(s.calc.recommended), Math.round(15000 / dim * 2.5));
+  await rpc('salary_pay', { p_user: ids.kitchen_staff, p: { month, amount: 1000, kind: 'advance', payment_mode: 'cash' } });
+  await rpc('salary_finalize', { p_user: ids.kitchen_staff, p_month: month, p_amount: 5000, p_note: 'agreed' });
+  await rpc('salary_pay', { p_user: ids.kitchen_staff, p: { month, amount: 200, kind: 'bonus' } });
+  const s2 = (await rpc('salary_month', { p_month: month })).staff.find(x => x.user_id === ids.kitchen_staff);
+  assert.equal(Number(s2.final), 5000);
+  assert.equal(Number(s2.payable), 5200);
+  assert.equal(Number(s2.pending), 4200);
+  const exp = await rpc('expenses_list', { p: { month, category: 'Salary & Wages' } });
+  assert.equal(Number(exp.totals.total), 1000, 'advance recorded as an expense, bonus is not');
+  // unpaid salary from an earlier month shows up on the next month
+  const [y, mo] = month.split('-').map(Number);
+  const next = new Date(Date.UTC(y, mo, 1)).toISOString().slice(0, 7);
+  const nx = (await rpc('salary_month', { p_month: next })).staff.find(x => x.user_id === ids.kitchen_staff);
+  assert.equal(Number(nx.earlier_pending), 4200);
+  assert.equal(nx.earlier[0].month, month);
+  await rpc('salary_pay', { p_user: ids.kitchen_staff, p: { month, amount: 4200, kind: 'salary', payment_mode: 'online' } });
+  const nx2 = (await rpc('salary_month', { p_month: next })).staff.find(x => x.user_id === ids.kitchen_staff);
+  assert.equal(Number(nx2.earlier_pending), 0);
+  await as(ids.manager);
+  await fails('salary_month', {}, /do not have access/);
+  const detail = await rpc('staff_detail', { p_id: ids.kitchen_staff });
+  assert.equal(detail.staff.monthly_salary, undefined, 'manager does not see salary by default');
+  assert.equal(detail.staff.designation, 'Helper');
+});
+
+test('staff without app login: record only, cannot sign in', async () => {
+  await as(ids.owner);
+  const u = await rpc('user_create', { p: { name: 'Raju Helper', role: 'kitchen_staff', app_access: false, kitchen: 'Snacks Kitchen', monthly_salary: 9000 } });
+  const prof = (await db.query('select username, app_access, kitchen, monthly_salary from public.profiles where id = $1', [u.id])).rows[0];
+  assert.equal(prof.app_access, false);
+  assert.equal(prof.kitchen, 'Snacks Kitchen');
+  assert.equal(Number(prof.monthly_salary), 9000);
+  const banned = (await db.query('select banned_until > now() b from auth.users where id = $1', [u.id])).rows[0].b;
+  assert.equal(banned, true);
+  await rpc('staff_doc_add', { p_user: u.id, p: { doc_type: 'id_proof', files: [{ path: `staff/${u.id}-raju/aadhaar.pdf`, name: 'aadhaar.pdf' }] } });
+  assert.equal((await rpc('staff_detail', { p_id: u.id })).documents.length, 1);
+  await fails('staff_doc_add', { p_user: u.id, p: { files: [{ path: `staff/${ids.cook}-x/a.pdf`, name: 'a.pdf' }] } }, /Invalid file path/);
+});
+
 test('tables are locked against direct access', async () => {
   const r = await db.query(`select has_table_privilege('anon', 'public.expenses', 'select') a, has_table_privilege('authenticated', 'public.profiles', 'select') b,
     has_function_privilege('anon', 'public.dashboard()', 'execute') c, has_function_privilege('authenticated', 'public.create_login(text,text,text,text,text,boolean)', 'execute') d,

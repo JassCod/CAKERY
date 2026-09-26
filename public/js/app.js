@@ -6,6 +6,7 @@ import { configured } from './backend.js';
 // route -> { title, group, icon, perms (any), load() }
 const ROUTES = {
   dashboard:  { title: 'Dashboard',        group: 'Overview',   icon: 'dashboard', perms: null, load: () => import('./pages/dashboard.js') },
+  attendance: { title: 'Attendance',      group: 'Daily work', icon: 'calendar',  perms: ['attendance.self', 'attendance.manage'], load: () => import('./pages/attendance.js') },
   production: { title: 'Production',       group: 'Daily work', icon: 'chef',      perms: ['production.view', 'production.log'], load: () => import('./pages/production.js') },
   orders:     { title: 'Cake Orders',      group: 'Daily work', icon: 'cake',      perms: ['orders.view'], load: () => import('./pages/orders.js') },
   closing:    { title: 'Daily Closing',    group: 'Daily work', icon: 'cash',      perms: ['closing.view', 'closing.create'], load: () => import('./pages/closing.js') },
@@ -14,7 +15,8 @@ const ROUTES = {
   vendors:    { title: 'Vendors',          group: 'Shop',       icon: 'truck',     perms: ['vendors.view'], load: () => import('./pages/vendors.js') },
   documents:  { title: 'Invoices & Docs',  group: 'Shop',       icon: 'folder',    perms: ['documents.view'], load: () => import('./pages/documents.js') },
   reports:    { title: 'Monthly History',  group: 'Insights',   icon: 'chart',     perms: ['reports.view'], load: () => import('./pages/reports.js') },
-  staff:      { title: 'Staff & Access',   group: 'Admin',      icon: 'users',     perms: ['users.manage', 'roles.manage'], load: () => import('./pages/staff.js') },
+  staff:      { title: 'Staff',            group: 'People',     icon: 'users',     perms: ['users.manage', 'roles.manage', 'staff.view'], load: () => import('./pages/staff.js') },
+  salary:     { title: 'Salary',           group: 'People',     icon: 'wallet',    perms: ['salary.view'], load: () => import('./pages/salary.js') },
   settings:   { title: 'Settings',         group: 'Admin',      icon: 'settings',  perms: ['settings.manage', 'audit.view'], load: () => import('./pages/settings.js') },
   account:    { title: 'My Account',       group: null,         icon: 'user',      perms: null, load: () => import('./pages/account.js') },
 };
@@ -157,7 +159,10 @@ async function route() {
     el.innerHTML = '';
     el.className = 'content page-enter';
     void el.offsetWidth;
-    await mod.default(el, { params, query, navigate, setTitle: t => { $('[data-title]').textContent = t; } });
+    // Fresh container per visit: a previous page that finishes loading late writes into its own detached box.
+    const pageEl = document.createElement('div');
+    el.appendChild(pageEl);
+    await mod.default(pageEl, { params, query, navigate, setTitle: t => { if (seq === routeSeq) $('[data-title]').textContent = t; } });
   } catch (e) {
     if (seq !== routeSeq) return;
     console.error(e);
