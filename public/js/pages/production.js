@@ -4,7 +4,15 @@ import { esc, icon, num, money, fmtDate, todayStr, addDays, relDay, toast, formM
 export default async function production(el, { query }) {
   let date = query.date || todayStr();
   let mine = false;
-  const items = (await api('/items' + qs({ type: 'product' }))).items;
+  let items = [];
+  let onlyProducts = true;
+  async function loadItems() {
+    const all = (await api('/items')).items;
+    const products = all.filter(i => i.type === 'product');
+    onlyProducts = products.length > 0;
+    items = onlyProducts ? products : all; // no products yet → offer every item rather than an empty list
+  }
+  await loadItems();
   const canLog = can('production.log', 'production.manage');
   const canSales = can('production.sales', 'production.log', 'production.manage');
   const isManager = can('production.manage');
@@ -38,13 +46,15 @@ export default async function production(el, { query }) {
       <div class="card-head"><h3>${icon('chef')} Log what was made${date !== todayStr() ? ' · ' + esc(relDay(date)) : ''}</h3></div>
       <form class="card-body quick-form" data-quick>
         <div class="field"><label>Item</label><select class="select" name="item_id" required><option value="">Choose item…</option>
-          ${items.map(i => `<option value="${i.id}">${esc(i.name)} (${esc(i.unit)})</option>`).join('')}</select></div>
+          ${items.map(i => `<option value="${i.id}">${esc(i.name)} (${esc(i.unit)})</option>`).join('')}
+          ${can('items.manage') ? '<option value="__new">+ Add a new product…</option>' : ''}</select></div>
         <div class="field"><label>Qty made</label><input class="input num" type="number" name="qty_made" min="0" step="any" required></div>
         <div class="field"><label>Sold <span class="muted">(optional)</span></label><input class="input num" type="number" name="qty_sold" min="0" step="any" placeholder="later"></div>
         <div class="field"><label>Notes</label><input class="input" name="notes" placeholder="e.g. eggless batch"></div>
         <button class="btn btn-primary" type="submit" style="height:40px">${icon('plus')} Add</button>
       </form>
-      ${!items.length ? `<div class="card-foot small muted">No products yet. ${can('items.manage') ? '<a href="#/items">Add products</a> first.' : 'Ask a manager to add products.'}</div>` : ''}
+      ${!items.length ? `<div class="card-foot small muted">No items yet. ${can('items.manage') ? 'Choose <b>+ Add a new product…</b> in the list above, or add them in <a href="#/items">Items &amp; Stock</a>.' : 'Ask a manager to add products in Items &amp; Stock.'}</div>`
+        : !onlyProducts ? `<div class="card-foot small muted">Showing all items because none are marked as <b>Product (for sale)</b>. Set the type to Product in <a href="#/items">Items &amp; Stock</a> to keep this list short.</div>` : ''}
     </div>` : ''}
 
     <div class="grid g4 mb">
@@ -91,10 +101,33 @@ export default async function production(el, { query }) {
 
     const quick = el.querySelector('[data-quick]');
     if (quick) {
+      const itemSel = quick.querySelector('select[name=item_id]');
+      itemSel.addEventListener('change', async () => {
+        if (itemSel.value !== '__new') return;
+        itemSel.value = '';
+        const r = await formModal({
+          title: 'Add a new product', size: 'narrow',
+          fields: [
+            { name: 'name', label: 'Product name', required: true, full: true, placeholder: 'e.g. Chocolate Pastry' },
+            { name: 'category', label: 'Category', type: 'datalist', options: state.settings.item_categories || [], full: true },
+            { name: 'unit', label: 'Unit', type: 'datalist', options: ['pcs', 'kg', 'box', 'dozen', 'tray'], value: 'pcs' },
+            { name: 'sell_price', label: 'Selling price', type: 'money' },
+          ],
+          onSubmit: v => api('/items', { method: 'POST', body: { ...v, type: 'product' } }),
+        });
+        if (r) {
+          toast('Product added');
+          await loadItems();
+          await load();
+          const sel = el.querySelector('[data-quick] select[name=item_id]');
+          if (sel) sel.value = String(r.id);
+          el.querySelector('[data-quick] input[name=qty_made]')?.focus();
+        }
+      });
       quick.addEventListener('submit', async e => {
         e.preventDefault();
         const f = Object.fromEntries(new FormData(quick));
-        if (!f.item_id || f.qty_made === '') { toast('Choose an item and quantity', 'error'); return; }
+        if (!f.item_id || f.item_id === '__new' || f.qty_made === '') { toast('Choose an item and quantity', 'error'); return; }
         try {
           await api('/production', { method: 'POST', body: { ...f, date } });
           toast('Production logged');
