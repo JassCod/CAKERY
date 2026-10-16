@@ -42,6 +42,15 @@ const CAKE_SVG = `
   <path class="flame" d="M200 64 c6 8 6 16 0 24 c-6 -8 -6 -16 0 -24z" fill="#fff3b0"/>
 </svg>`;
 
+const LOCK_SVG = `
+<svg viewBox="0 0 64 64" aria-hidden="true">
+  <defs><linearGradient id="lk-body" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#f58fb0"/><stop offset="1" stop-color="#c43c6b"/></linearGradient></defs>
+  <path class="shackle" d="M20 30 V20 a12 12 0 0 1 24 0 V30" fill="none" stroke="#8a3352" stroke-width="6" stroke-linecap="round"/>
+  <rect class="body" x="12" y="28" width="40" height="30" rx="9" fill="url(#lk-body)"/>
+  <rect x="15" y="31" width="34" height="6" rx="3" fill="#fff" opacity=".25"/>
+  <g class="keyhole" fill="#fff"><circle cx="32" cy="41" r="4.2"/><path d="M30 43 h4 l1.2 8 h-6.4z"/></g>
+</svg>`;
+
 const SPRINKLE_COLORS = ['#ffd166', '#f58fb0', '#7ad3c0', '#ffffff', '#c7a4ff'];
 
 export function renderLogin(root, { shopName = 'Cakery', tagline = '', onSuccess, needsSetup = false, notConfigured = false, connectError = '' }) {
@@ -66,6 +75,7 @@ export function renderLogin(root, { shopName = 'Cakery', tagline = '', onSuccess
       <div class="cake-stage">${CAKE_SVG}</div>
     </section>
     <section class="login-panel">
+      <span class="orb o1"></span><span class="orb o2"></span><span class="orb o3"></span>
       <button class="btn btn-ghost btn-icon login-theme" data-theme-toggle aria-label="Toggle theme">${icon('moon')}</button>
       ${notConfigured ? `<div class="login-card">
         <div class="hello">Almost <em>ready</em></div>
@@ -78,6 +88,7 @@ export function renderLogin(root, { shopName = 'Cakery', tagline = '', onSuccess
           <li>Re-run the <b>Deploy to GitHub Pages</b> action, then reload this page.</li>
         </ol>
       </div>` : `<form class="login-card" novalidate autocomplete="on">
+        <div class="lock-anim" data-lock>${LOCK_SVG}</div>
         <div class="hello">${needsSetup ? 'Set up your <em>shop</em>' : 'Welcome <em>back</em>'}</div>
         <div class="sub">${needsSetup ? 'First time here — create the owner account. You can add staff after signing in.' : 'Sign in with the account your shop owner gave you.'}</div>
         <div class="login-error ${connectError ? '' : 'hidden'}" role="alert">${esc(connectError)}</div>
@@ -108,6 +119,9 @@ export function renderLogin(root, { shopName = 'Cakery', tagline = '', onSuccess
   const form = $('.login-card', root);
   const err = $('.login-error', root);
   const pw = $('#lg-pass', root);
+  const lock = $('[data-lock]', root);
+  pw.addEventListener('input', () => lock.classList.toggle('typing', pw.value.length > 0));
+  lock.addEventListener('animationend', () => lock.classList.remove('shake'));
   $('.toggle-pw', root).onclick = e => {
     const show = pw.type === 'password';
     pw.type = show ? 'text' : 'password';
@@ -129,13 +143,15 @@ export function renderLogin(root, { shopName = 'Cakery', tagline = '', onSuccess
     try {
       if (needsSetup) await api('/auth/setup', { method: 'POST', body: { name: form.name.value.trim(), username, password, confirm: form.confirm.value } });
       else await api('/auth/login', { method: 'POST', body: { username, password } });
-      root.querySelector('.login').classList.add('leaving');
-      setTimeout(onSuccess, 350);
+      lock.classList.remove('typing');
+      lock.classList.add('unlocked');
+      setTimeout(() => root.querySelector('.login').classList.add('leaving'), 450);
+      setTimeout(onSuccess, 800);
     } catch (ex) {
       showErr(ex.message);
       btn.disabled = false; btn.innerHTML = label;
     }
   });
-  function showErr(m) { err.textContent = m; err.classList.remove('hidden'); err.style.animation = 'none'; void err.offsetWidth; err.style.animation = ''; }
+  function showErr(m) { lock.classList.remove('shake'); void lock.offsetWidth; lock.classList.add('shake'); err.textContent = m; err.classList.remove('hidden'); err.style.animation = 'none'; void err.offsetWidth; err.style.animation = ''; }
   setTimeout(() => $(needsSetup ? '#lg-name' : '#lg-user', root).focus({ preventScroll: true }), 400);
 }

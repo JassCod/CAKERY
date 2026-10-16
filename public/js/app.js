@@ -2,6 +2,7 @@ import { state, api, can } from './state.js';
 import { esc, icon, avatar, destroyCharts, toast, fmtDate, todayStr, $ } from './ui.js';
 import { renderLogin } from './login.js';
 import { configured } from './backend.js';
+import './effects.js';
 
 // route -> { title, group, icon, perms (any), load() }
 const ROUTES = {
