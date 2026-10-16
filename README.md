@@ -63,7 +63,9 @@ You need a free **Supabase** account and this GitHub repository. Nothing here co
 5. Open the link. The first screen asks you to **create the owner account** (your name, username, password). Then add your staff under **Staff & Access** and share the link with them.
 
 > GitHub Pages is free for **public** repositories. If the repository is private, make it public under **Settings → General → Danger Zone → Change visibility** (your data stays private — it is in Supabase, protected by logins, not in the code).
-> Supabase's free plan pauses a project after about a week with **no** activity; daily use keeps it awake. If it ever pauses, click **Restore** in the Supabase dashboard.
+> Supabase's free plan pauses a project after about a week with **no** activity. The **Keep Supabase awake** workflow pings the database once a day to prevent this. If it ever pauses anyway, click **Restore** in the Supabase dashboard.
+
+**Also live on Vercel:** https://cakery-one.vercel.app — every push to `main` redeploys automatically (settings in `vercel.json`).
 
 ### Is the public key safe?
 Yes. The *anon* key only lets the browser call the functions in `setup.sql`. Every table is locked, and each function checks who is signed in and what their role allows before reading or changing anything. A cook cannot see money even by calling the database directly.
